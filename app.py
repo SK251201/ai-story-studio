@@ -377,10 +377,10 @@ with character_tab:
             st.warning("Enter both a name and description.")
     for index, character in enumerate(st.session_state.characters):
         st.markdown(f"**{character['name']}** ({character.get('type', 'Character')}) — {character['description']}")
-        model_upload = st.file_uploader("Upload rigged 3D character model (.glb)", type=["glb"], key=f"character_model_{index}")
+        model_upload = st.file_uploader("Upload rigged 3D character model (.glb or .fbx)", type=["glb", "fbx"], key=f"character_model_{index}")
         if model_upload:
             safe_name = "".join(ch.lower() if ch.isalnum() else "_" for ch in character["name"]).strip("_")
-            character["asset_file"] = (safe_name or f"character_{index}") + ".glb"
+            character["asset_file"] = (safe_name or f"character_{index}") + Path(model_upload.name).suffix.lower()
             character["model_bytes"] = model_upload.getvalue()
             st.success(f"3D model attached: {character['asset_file']}")
         elif character.get("model_bytes"):
