@@ -39,15 +39,37 @@ def generate_scene_image(scene, characters, visual_style, ratio, progress_callba
         for item in characters if item.get("name") in cast
     ]
     cast_text = "; ".join(character_notes) or "Follow the original character descriptions in the scene."
+    style_name = str(visual_style).lower()
+    if "photoreal" in style_name or "live-action" in style_name:
+        render_direction = (
+            "Photorealistic live-action cinematic still photograph, real human skin texture and pores, "
+            "natural facial proportions, realistic eyes, individual hair strands, authentic fabric texture, "
+            "professional full-frame cinema camera, physically accurate lighting, natural depth of field, "
+            "high-end film colour grading. It must look like a real photographed scene, not an illustration."
+        )
+    elif "animal" in style_name and "realistic" in style_name:
+        render_direction = (
+            "Ultra-detailed realistic 3D animal film still, lifelike anatomy, individually rendered fur or feathers, "
+            "natural eyes, physically based materials, cinematic natural lighting and believable environment."
+        )
+    elif "stylized" in style_name:
+        render_direction = (
+            "Premium studio-quality stylized 3D animated feature film still, appealing expressive character design, "
+            "detailed 3D materials, polished animation-movie lighting and cinematic composition."
+        )
+    else:
+        render_direction = (
+            "Premium cinematic realistic 3D animated family film still, believable human or animal anatomy, "
+            "expressive natural faces, detailed hair and clothing, realistic skin and fur textures, "
+            "physically based materials, soft global illumination and professional cinematography."
+        )
     prompt = (
-        "Premium cinematic 3D animated family film frame, realistic polished 3D rendering, "
-        "believable human or animal anatomy, expressive natural faces, detailed hair and clothing, "
-        "realistic skin and fur textures, detailed environment, professional cinematography, "
-        "soft global illumination, natural shadows, natural colors, beautiful composition, crisp focus. "
+        render_direction + " "
         f"Visual direction: {visual_style}. Character continuity: {cast_text}. "
         f"Scene: {scene.get('heading', '')}. Action and camera: {scene.get('visual_prompt', '')}. "
-        "One single coherent cinematic frame, original characters only, consistent face, hairstyle, "
-        "clothing and colors, clear readable action, no text, logo, watermark or collage."
+        "One single coherent cinematic frame, original characters only, keep each saved character's "
+        "face, hairstyle, body proportions, outfit and signature colours consistent, clear readable action, "
+        "no text, logo, watermark or collage."
     )
     negative = (
         "flat vector, stick figure, crude cartoon, blurry, pixelated, bad anatomy, extra fingers, "
@@ -756,6 +778,49 @@ with character_tab:
             st.warning("Enter both a name and description.")
 
     st.divider()
+    st.markdown("#### Save or move your character library")
+    library_data = {
+        "format": "ai-story-studio-character-library",
+        "version": 1,
+        "characters": [
+            {key: value for key, value in item.items() if key != "model_bytes"}
+            for item in st.session_state.characters
+        ],
+    }
+    st.download_button(
+        "Download character library",
+        json.dumps(library_data, ensure_ascii=False, indent=2).encode("utf-8"),
+        file_name="ai_story_studio_characters.json",
+        mime="application/json"
+    )
+    library_upload = st.file_uploader(
+        "Import a saved character library", type=["json"], key="character_library_import"
+    )
+    if st.button("Import characters", disabled=(library_upload is None), key="import_character_library"):
+        try:
+            imported = json.loads(library_upload.getvalue().decode("utf-8"))
+            incoming = imported.get("characters", [])
+            if not isinstance(incoming, list):
+                raise ValueError("This file does not contain a character list.")
+            existing = {item.get("name", "").casefold() for item in st.session_state.characters}
+            count = 0
+            for item in incoming[:50]:
+                if not isinstance(item, dict) or not item.get("name") or not item.get("description"):
+                    continue
+                if item["name"].casefold() in existing:
+                    continue
+                item["model_bytes"] = None
+                item.setdefault("portrait_base64", "")
+                item.setdefault("asset_file", "")
+                st.session_state.characters.append(item)
+                existing.add(item["name"].casefold())
+                count += 1
+            st.success(f"Imported {count} character(s).")
+            st.rerun()
+        except Exception as error:
+            st.error(f"Could not import character library: {error}")
+
+    st.divider()
     st.markdown(f"#### Your reusable cast ({len(st.session_state.characters)} characters)")
     for index, character in enumerate(st.session_state.characters):
         with st.expander(f"{character.get('name', 'Character')} · {character.get('type', 'Character')}", expanded=(index == 0)):
@@ -1037,4 +1102,4 @@ with history_tab:
             st.error(f"Could not restore history: {error}")
 
 st.divider()
-st.caption("Version 4.4 · Character Studio, image-to-character extraction, reusable character packs and free portrait generation, reusable characters, 3D production tools and YouTube-ready exports.")
+st.caption("Version 4.5 · Character Studio, uploaded-image character extraction, portable character libraries, photoreal and 3D portrait styles, reusable characters, 3D production tools and YouTube-ready exports.")
