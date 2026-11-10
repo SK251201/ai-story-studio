@@ -277,9 +277,14 @@ def generate_character_portrait(character, visual_style, ratio):
     scene = {
         "heading": f"Character reference portrait: {character.get('name', 'Original character')}",
         "visual_prompt": (
-            character.get("visual_prompt")
-            or f"Full-body front three-quarter character reference portrait. {character.get('description', '')}. "
-            "Show the complete outfit and body clearly, neutral studio background, standing pose."
+            "Create a premium professional character reference portrait. "
+            "Show one character only, full body, front three-quarter view, standing naturally, "
+            "complete head-to-toe body and outfit visible, clean neutral studio background, "
+            "sharp detailed face and eyes, natural anatomy, realistic hands, cinematic soft studio lighting. "
+            "Keep the same facial features, hairstyle, skin tone, body proportions, clothing and accessories "
+            "described below. Do not add other people, text, logos or watermarks. "
+            f"Character details: {character.get('description', '')}. "
+            f"Additional visual direction: {character.get('visual_prompt', '')}"
         ),
         "characters": [character.get("name", "")],
     }
@@ -849,6 +854,21 @@ with character_tab:
             st.error(f"Could not import character library: {error}")
 
     st.divider()
+    portrait_style = st.selectbox(
+        "Character portrait appearance",
+        [
+            "Photoreal live-action human",
+            "High-quality realistic 3D humans",
+            "Stylized 3D animated humans",
+            "Photoreal realistic animals",
+            "Realistic 3D animals",
+            "Stylized 3D animated animals",
+            "3D fantasy characters",
+        ],
+        key="character_portrait_style",
+        help="Choose the portrait look independently from the visual style used for your current story."
+    )
+
     st.markdown(f"#### Your reusable cast ({len(st.session_state.characters)} characters)")
     for index, character in enumerate(st.session_state.characters):
         with st.expander(f"{character.get('name', 'Character')} · {character.get('type', 'Character')}", expanded=(index == 0)):
@@ -873,7 +893,7 @@ with character_tab:
                 if st.button("Generate free character portrait", key=f"character_portrait_{index}"):
                     try:
                         with st.spinner("Waiting for a free community image worker..."):
-                            portrait = generate_character_portrait(character, visual_style, video_ratio)
+                            portrait = generate_character_portrait(character, portrait_style, video_ratio)
                         character["portrait_base64"] = base64.b64encode(portrait).decode("ascii")
                         save_history_snapshot()
                         st.success("Character portrait saved to your reusable library.")
@@ -1140,4 +1160,4 @@ with history_tab:
             st.error(f"Could not restore history: {error}")
 
 st.divider()
-st.caption("Version 4.6 · Character Studio, uploaded-image character crops, Gemini 3.8 vision extraction, portable libraries, photoreal and 3D portraits, reusable characters, 3D production tools and YouTube-ready exports.")
+st.caption("Version 4.7 · Character Studio with independent photoreal human, realistic animal and stylized 3D portrait controls, reusable characters, 3D production tools and YouTube-ready exports.")
