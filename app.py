@@ -71,7 +71,7 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
                     raise ValueError("Gemini returned no story. Try again or check your API key.")
                 raw = candidates[0]["content"]["parts"][0]["text"].strip()
                 if raw.startswith("```"):
-                    raw = raw.split("\\n", 1)[1].rsplit("```", 1)[0]
+                    raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
                 data = json.loads(raw)
                 if not isinstance(data.get("scenes"), list) or not data["scenes"]:
                     raise ValueError("The generated response did not contain any scenes.")
