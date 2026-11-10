@@ -1,73 +1,73 @@
-# AI Story Studio — Version 3
+# AI Story Studio — Version 4 (3D production milestone)
 
-A Streamlit application for drafting original stories, building scene storyboards, adding text-to-speech narration and exporting MP4 slideshow videos for YouTube Shorts (9:16) or widescreen (16:9).
+AI Story Studio helps create original multi-genre stories and prepare reusable character assets for 3D video production.
 
-## Version 2 features
-- Gemini-powered story and scene-prompt generation
-- Character library for consistent story planning
-- Editable scene headings, narration, dialogue and visual prompts
-- Generate scene illustrations with Gemini image generation (requires supported model access and quota)
-- Use the first generated scene image as a visual reference for later scenes
-- Upload individual images for scenes
-- English, Tamil and Hindi narration through gTTS
-- FFmpeg MP4 export in vertical or widescreen format
-- Download a complete JSON project backup, including uploaded artwork
-- Reload a saved project later
-- Download the story script as a text file
-- Optional manual YouTube upload using Google OAuth; uploads are always Unlisted
+## Creative formats
+- Tamil and English nursery rhymes / children's songs
+- Comedy, moral and bedtime stories
+- Adventure, educational, fantasy and animal stories
+- Family-friendly mystery, sci-fi and superhero stories
 
-## Important limitation
-The app creates narrated slideshow videos from still images; it does not generate full moving animation. AI image generation requires Gemini image-model access and may consume quota or incur charges. Character consistency is guided by a reference image, not guaranteed.
+## Streamlit studio features
+- Gemini story and shot-direction generation (API key and provider quotas apply)
+- Character bible with type, appearance and personality
+- Per-character GLB model upload
+- Per-scene character casting and editable narration/dialogue/shot direction
+- Project JSON backup including attached 3D character files and storyboard images
+- Existing narrated slideshow MP4 export
+- Optional manual YouTube upload as Unlisted
 
-## Run locally
+## Local Blender 3D production milestone
+The 3D Production tab can package the story, character GLB files and Blender renderer into a ZIP. Rendering happens on a local computer because Streamlit Community Cloud is not a Blender render farm.
+
+The current renderer:
+- Imports original user-owned GLB models
+- Reuses the same model across scenes
+- Creates a simple lit 3D stage and camera
+- Adds basic root/camera movement
+- Generates English, Tamil or Hindi narration
+- Renders 1080p MP4 in 16:9 or 9:16 using Blender and FFmpeg
+
+**Current limitations:** this is an initial 3D pipeline, not a finished studio animation engine. It does not generate 3D characters from text, automatically create detailed body choreography, facial acting, lip-sync, scene-specific props, or custom music. The GLB model should be rigged and preferably include animation actions. Quality depends heavily on the model and its included animation. Review every rendered scene before publishing.
+
+## Local rendering setup
+1. Create a story in the web app.
+2. Add each original character in Characters.
+3. Upload a rigged .glb model for each character.
+4. Assign characters to scenes in Storyboard.
+5. Open 3D Production and download the production ZIP.
+6. Extract the ZIP on a Windows, macOS or Linux computer.
+7. Install Blender 4.2+ (Blender 5.x recommended) and FFmpeg.
+8. Install Python 3.10+ and run: python -m pip install gTTS
+9. Open a terminal in the extracted folder and run:
+   python render_project.py --language Tamil --ratio 16:9
+10. For Shorts use:
+    python render_project.py --language Tamil --ratio 9:16
+
+If Blender or FFmpeg is not on PATH, use --blender and --ffmpeg with their full executable paths. Rendering time depends on the computer, number of scenes and model complexity.
+
+## Run the Streamlit app locally
 1. Install Python 3.10 or newer.
 2. Clone this repository.
-3. Install dependencies: `pip install -r requirements.txt`.
-4. Run: `streamlit run app.py`.
-5. Enter a Gemini API key in the sidebar, or set `GEMINI_API_KEY` as an environment variable.
+3. Install dependencies: pip install -r requirements.txt
+4. Run: streamlit run app.py
+5. Add GEMINI_API_KEY to Streamlit Secrets or environment variables.
 
-Create a key at https://aistudio.google.com/app/apikey.
+Never put API keys in source code or commit them to GitHub.
 
 ## Deploy on Streamlit Community Cloud
-1. Sign in at https://share.streamlit.io/.
-2. Select **Create app**.
-3. Choose repository `SK251201/ai-story-studio`, branch `main`, and main file `app.py`.
-4. Add this under app settings → Secrets:
+Select repository SK251201/ai-story-studio, branch main, main file app.py. Add this to app Secrets:
 
-```toml
 GEMINI_API_KEY = "your-own-api-key"
-```
 
-5. Deploy or reboot the app after updating the repository.
+Then deploy or reboot the app. Never share your API key in chat.
 
-Never put your API key in source code or commit it to GitHub.
+## Important costs and licensing
+- Gemini API has model-specific quotas and may require billing after free limits. This app cannot bypass those limits.
+- Blender is free and open source; local rendering uses your computer's resources.
+- gTTS requires internet access.
+- Use only original stories, models, voices and music that you have rights to use commercially.
+- YouTube monetisation is not guaranteed; repetitive or mass-produced content may not qualify.
 
-## Testing
-A GitHub Actions workflow compiles the Python application on every push and pull request. This catches syntax errors; it does not replace a live Streamlit browser test or a real Gemini/FFmpeg export test.
-
-## Notes
-- Gemini API access may be subject to quotas, model availability and billing terms.
-- gTTS requires internet access during narration generation.
-- Video rendering can take several minutes and may hit Streamlit Cloud resource limits for large projects.
-- Use original stories and properly licensed artwork/audio. YouTube monetisation is not guaranteed; repetitive or mass-produced content may not qualify.
-
-## Optional YouTube upload setup
-The app supports **manual uploads only** and sets every uploaded video's visibility to **Unlisted**. It never uploads automatically when an MP4 is rendered.
-
-1. In Google Cloud Console, create or select a project and enable **YouTube Data API v3**.
-2. Configure the OAuth consent screen. Add your Google account as a test user while the app is in Testing mode.
-3. Create an OAuth Client ID with application type **Web application**.
-4. Add your deployed Streamlit app URL (for example, `https://YOUR-APP.streamlit.app/`) as an authorized redirect URI. It must match exactly.
-5. In Streamlit Community Cloud → App → Settings → Secrets, add:
-
-```toml
-[youtube]
-client_id = "YOUR_GOOGLE_OAUTH_CLIENT_ID"
-client_secret = "YOUR_GOOGLE_OAUTH_CLIENT_SECRET"
-
-youtube_redirect_uri = "https://YOUR-APP.streamlit.app/"
-```
-
-6. Save secrets and reboot the app. Open **Voice & Export**, generate an MP4, click **Connect YouTube channel**, approve the Google permission request, then click **Upload this video as Unlisted** only when you are ready.
-
-The app requests the `youtube.upload` OAuth scope. Keep OAuth client secrets in Streamlit Secrets only; never commit them to GitHub or share them in chat. Google may require OAuth app verification for broader public use. While the OAuth consent screen is in Testing mode, refresh-token behavior and test-user access are subject to Google's testing restrictions. Review the uploaded video in YouTube Studio before changing its visibility.
+## Optional YouTube upload
+The app supports manual uploads only and uploads as Unlisted. It does not publish automatically. OAuth setup is required in Google Cloud Console; keep client secrets in Streamlit Secrets only.
