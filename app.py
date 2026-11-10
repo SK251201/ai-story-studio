@@ -33,12 +33,14 @@ def generate_story(key, idea, genre, style, count, characters):
 Create an original {genre} story based on this idea: {idea}
 Visual direction: {style}
 Character bible: {characters or "Create suitable original characters."}
-Return exactly {count} scenes as valid JSON with this structure:
+Create a production-ready script for a 3D animated video. Every visual_prompt must specify camera framing,
+camera movement, character action, facial expression, body language, environment, lighting, time of day and mood.
+Use original characters only. Return exactly {count} scenes as valid JSON with this structure:
 {{
   "title": "story title",
   "logline": "one sentence",
   "scenes": [
-    {{"heading":"scene heading","narration":"voiceover text","dialogue":"spoken dialogue","visual_prompt":"detailed image prompt"}}
+    {{"heading":"scene heading","narration":"voiceover text","dialogue":"spoken dialogue","visual_prompt":"detailed 3D shot direction","characters":["character names appearing in this shot"]}}
   ]
 }}
 Keep character appearance and names consistent in every scene. Return JSON only.
@@ -83,6 +85,7 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
                 for scene in data["scenes"]:
                     for field in ("heading", "narration", "dialogue", "visual_prompt"):
                         scene.setdefault(field, "")
+                    scene.setdefault("characters", [])
                 return data
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as error:
                 last_error = error
@@ -358,7 +361,7 @@ with character_tab:
         character_name = st.text_input("Character name")
         character_description = st.text_area("Appearance, personality and defining details",
                 placeholder="Age, face, hairstyle, skin tone, outfit, body shape, personality and signature details")
-            character_type = st.selectbox("Character type", ["Human", "Animal", "Fantasy", "Other"])
+                    character_type = st.selectbox("Character type", ["Human", "Animal", "Fantasy", "Other"])
         add_character = st.form_submit_button("Add character")
     if add_character:
         if character_name.strip() and character_description.strip():
