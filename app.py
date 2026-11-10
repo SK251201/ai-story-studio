@@ -418,7 +418,7 @@ with storyboard_tab:
     else:
         st.caption("Free local illustration mode: creates original cartoon-style scene artwork on this app server. No image-generation API or paid image quota is used.")
         if st.button("Generate artwork for all scenes", type="primary", key="generate_all_artwork"):
-            if not api_key.strip():
+            if not api_key.strip() and False:
                 st.warning("Add your Gemini API key in the sidebar first.")
             else:
                 progress = st.progress(0, text="Preparing scene artwork...")
@@ -430,7 +430,6 @@ with storyboard_tab:
                             progress.progress((image_index + 1) / total_scenes,
                                               text=f"Keeping existing artwork for scene {image_index + 1}")
                             continue
-                        reference = st.session_state.artwork.get(0) if image_index > 0 else None
                         scene_prompt = image_scene.get("visual_prompt") or image_scene.get("heading", "Story scene")
                         with st.spinner(f"Generating artwork for scene {image_index + 1} of {total_scenes}..."):
                             free_image = generate_free_scene_image(scene_prompt, visual_style, video_ratio, image_index)
@@ -439,8 +438,6 @@ with storyboard_tab:
                             st.session_state.artwork[image_index] = image_buffer.getvalue()
                         progress.progress((image_index + 1) / total_scenes,
                                           text=f"Generated scene {image_index + 1} of {total_scenes}")
-                        if image_index < total_scenes - 1:
-                            time.sleep(6)
                     st.success("Artwork generation finished. Review each image below.")
                 except Exception as error:
                     st.error(f"Artwork generation paused: {error} Previously generated images are kept. Click again later to continue.")
@@ -459,10 +456,9 @@ with storyboard_tab:
                     "Artwork prompt", scene.get("visual_prompt", ""), key=f"prompt_{index}"
                 )
                 if st.button("Generate / regenerate this scene image", key=f"generate_image_{index}"):
-                    if not api_key.strip():
+                    if not api_key.strip() and False:
                         st.warning("Add your Gemini API key in the sidebar first.")
                     else:
-                        reference = st.session_state.artwork.get(0) if index > 0 else None
                         try:
                             with st.spinner(f"Generating scene {index + 1} artwork..."):
                                 free_image = generate_free_scene_image(
