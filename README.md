@@ -21,14 +21,14 @@ AI Story Studio helps create original multi-genre stories and prepare reusable c
 The 3D Production tab can package the story, character GLB files and Blender renderer into a ZIP. Rendering happens on a local computer because Streamlit Community Cloud is not a Blender render farm.
 
 The current renderer:
-- Imports original user-owned GLB models
+- Imports original user-owned GLB/FBX models
 - Reuses the same model across scenes
 - Creates a simple lit 3D stage and camera
 - Adds basic root/camera movement
 - Generates English, Tamil or Hindi narration
 - Renders 1080p MP4 in 16:9 or 9:16 using Blender and FFmpeg
 
-**Current limitations:** this is an initial 3D pipeline, not a finished studio animation engine. It does not generate 3D characters from text, automatically create detailed body choreography, facial acting, lip-sync, scene-specific props, or custom music. The GLB model should be rigged and preferably include animation actions. Quality depends heavily on the model and its included animation. Review every rendered scene before publishing.
+**Current limitations:** this is an initial 3D pipeline, not a finished studio animation engine. It does not generate 3D characters from text, automatically create detailed body choreography, facial acting, lip-sync, scene-specific props, or custom music. The GLB/FBX model should be rigged and preferably include animation actions. Quality depends heavily on the model and its included animation. Review every rendered scene before publishing.
 
 ## Local rendering setup
 1. Create a story in the web app.
@@ -64,7 +64,7 @@ Then deploy or reboot the app. Never share your API key in chat.
 
 ## Important costs and licensing
 - Gemini API has model-specific quotas and may require billing after free limits. This app cannot bypass those limits.
-- Blender is free and open source; local rendering uses your computer's resources.
+- Blender is free and open source; local rendering uses your computer's resources. Adobe Mixamo provides free humanoid characters and animations; check its licence and download a rigged FBX for use in the app.
 - gTTS requires internet access.
 - Use only original stories, models, voices and music that you have rights to use commercially.
 - YouTube monetisation is not guaranteed; repetitive or mass-produced content may not qualify.
