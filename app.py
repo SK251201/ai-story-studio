@@ -53,7 +53,7 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {"responseMimeType": "application/json"},
                     },
-                    timeout=90,
+                    timeout=(15, 180),
                 )
                 if response.status_code in (429, 500, 502, 503, 504):
                     last_error = requests.HTTPError(
@@ -79,6 +79,12 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
                     for field in ("heading", "narration", "dialogue", "visual_prompt"):
                         scene.setdefault(field, "")
                 return data
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as error:
+                last_error = error
+                if attempt == 0:
+                    time.sleep(3)
+                    continue
+                break
             except requests.HTTPError as error:
                 status = error.response.status_code if error.response is not None else None
                 if status in (429, 500, 502, 503, 504):
