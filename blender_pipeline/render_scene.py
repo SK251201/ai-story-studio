@@ -63,7 +63,10 @@ for slot, name in enumerate(wanted[:4]):
     if not model_path or not os.path.isfile(model_path):
         continue
     before = set(bpy.data.objects)
-    bpy.ops.import_scene.gltf(filepath=model_path)
+    if model_path.lower().endswith(".fbx"):
+        bpy.ops.import_scene.fbx(filepath=model_path)
+    else:
+        bpy.ops.import_scene.gltf(filepath=model_path)
     imported = [obj for obj in bpy.data.objects if obj not in before]
     if not imported:
         continue
