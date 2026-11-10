@@ -356,19 +356,32 @@ with character_tab:
     st.subheader("Character library")
     with st.form("add_character", clear_on_submit=True):
         character_name = st.text_input("Character name")
-        character_description = st.text_area("Appearance, personality and defining details")
+        character_description = st.text_area("Appearance, personality and defining details",
+                placeholder="Age, face, hairstyle, skin tone, outfit, body shape, personality and signature details")
+            character_type = st.selectbox("Character type", ["Human", "Animal", "Fantasy", "Other"])
         add_character = st.form_submit_button("Add character")
     if add_character:
         if character_name.strip() and character_description.strip():
             st.session_state.characters.append({
                 "name": character_name.strip(),
                 "description": character_description.strip(),
+                "type": character_type,
+                "asset_file": "",
+                "model_bytes": None,
             })
             st.success("Character added.")
         else:
             st.warning("Enter both a name and description.")
     for index, character in enumerate(st.session_state.characters):
-        st.markdown(f"**{character['name']}** — {character['description']}")
+        st.markdown(f"**{character['name']}** ({character.get('type', 'Character')}) — {character['description']}")
+        model_upload = st.file_uploader("Upload rigged 3D character model (.glb)", type=["glb"], key=f"character_model_{index}")
+        if model_upload:
+            safe_name = "".join(ch.lower() if ch.isalnum() else "_" for ch in character["name"]).strip("_")
+            character["asset_file"] = (safe_name or f"character_{index}") + ".glb"
+            character["model_bytes"] = model_upload.getvalue()
+            st.success(f"3D model attached: {character['asset_file']}")
+        elif character.get("model_bytes"):
+            st.caption(f"3D model attached: {character.get('asset_file')}")
         if st.button("Remove", key=f"remove_character_{index}"):
             st.session_state.characters.pop(index)
             st.rerun()
@@ -377,69 +390,54 @@ with storyboard_tab:
     if not st.session_state.story:
         st.info("Generate or load a project to edit its storyboard.")
     else:
-        st.caption("Free local illustration mode: creates original cartoon-style scene artwork on this app server. No image-generation API or paid image quota is used.")
-        if st.button("Generate artwork for all scenes", type="primary", key="generate_all_artwork"):
-            if not api_key.strip() and False:
-                st.warning("Add your Gemini API key in the sidebar first.")
-            else:
-                progress = st.progress(0, text="Preparing scene artwork...")
-                try:
-                    scenes = st.session_state.story["scenes"]
-                    total_scenes = len(scenes)
-                    for image_index, image_scene in enumerate(scenes):
-                        if image_index in st.session_state.artwork:
-                            progress.progress((image_index + 1) / total_scenes,
-                                              text=f"Keeping existing artwork for scene {image_index + 1}")
-                            continue
-                        scene_prompt = image_scene.get("visual_prompt") or image_scene.get("heading", "Story scene")
-                        with st.spinner(f"Generating artwork for scene {image_index + 1} of {total_scenes}..."):
-                            free_image = generate_free_scene_image(scene_prompt, visual_style, video_ratio, image_index)
-                            image_buffer = BytesIO()
-                            free_image.save(image_buffer, format="PNG")
-                            st.session_state.artwork[image_index] = image_buffer.getvalue()
-                        progress.progress((image_index + 1) / total_scenes,
-                                          text=f"Generated scene {image_index + 1} of {total_scenes}")
-                    st.success("Artwork generation finished. Review each image below.")
-                except Exception as error:
-                    st.error(f"Artwork generation paused: {error} Previously generated images are kept. Click again later to continue.")
+        st.info("Storyboard images are optional references. For actual 3D animation, attach rigged GLB characters in Characters and use 3D Production.")
+        character_names = [item["name"] for item in st.session_state.characters]
         for index, scene in enumerate(st.session_state.story["scenes"]):
             with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}", expanded=(index == 0)):
-                scene["heading"] = st.text_input(
-                    "Scene heading", scene.get("heading", ""), key=f"heading_{index}"
+                scene["heading"] = st.text_input("Scene heading", scene.get("heading", ""), key=f"heading_{index}")
+                scene["narration"] = st.text_area("Narration", scene.get("narration", ""), key=f"narration_{index}")
+                scene["dialogue"] = st.text_area("Dialogue", scene.get("dialogue", ""), key=f"dialogue_{index}")
+                scene["visual_prompt"] = st.text_area("3D shot direction", scene.get("visual_prompt", ""), key=f"prompt_{index}")
+                scene["characters"] = st.multiselect(
+                    "Characters in this scene", character_names,
+                    default=[name for name in scene.get("characters", []) if name in character_names],
+                    key=f"scene_characters_{index}"
                 )
-                scene["narration"] = st.text_area(
-                    "Narration", scene.get("narration", ""), key=f"narration_{index}"
-                )
-                scene["dialogue"] = st.text_area(
-                    "Dialogue", scene.get("dialogue", ""), key=f"dialogue_{index}"
-                )
-                scene["visual_prompt"] = st.text_area(
-                    "Artwork prompt", scene.get("visual_prompt", ""), key=f"prompt_{index}"
-                )
-                if st.button("Generate / regenerate this scene image", key=f"generate_image_{index}"):
-                    if not api_key.strip() and False:
-                        st.warning("Add your Gemini API key in the sidebar first.")
-                    else:
-                        try:
-                            with st.spinner(f"Generating scene {index + 1} artwork..."):
-                                free_image = generate_free_scene_image(
-                                    scene.get("visual_prompt") or scene.get("heading", "Story scene"),
-                                    visual_style, video_ratio, index
-                                )
-                                image_buffer = BytesIO()
-                                free_image.save(image_buffer, format="PNG")
-                                st.session_state.artwork[index] = image_buffer.getvalue()
-                            st.success("Scene artwork generated.")
-                        except Exception as error:
-                            st.error(f"Image generation failed: {error}")
-                uploaded = st.file_uploader(
-                    "Or upload your own scene artwork", type=["png", "jpg", "jpeg"], key=f"art_{index}"
-                )
+                uploaded = st.file_uploader("Optional storyboard reference image", type=["png", "jpg", "jpeg"], key=f"art_{index}")
                 if uploaded:
                     st.session_state.artwork[index] = uploaded.getvalue()
                 if index in st.session_state.artwork:
                     st.image(st.session_state.artwork[index], use_container_width=True)
-        st.caption("Generated or uploaded scene artwork is used automatically when you build the narrated MP4.")
+        st.caption("3D rendering uses the uploaded GLB models, not the storyboard reference images.")
+
+with production_tab:
+    st.subheader("3D animated production package")
+    st.write("Package your story and reusable 3D character models for local Blender rendering.")
+    st.warning("Blender rendering runs on your computer, not Streamlit Cloud. You need Blender, FFmpeg and at least one rigged GLB character model.")
+    attached = [item for item in st.session_state.characters if item.get("model_bytes")]
+    st.metric("3D character models attached", len(attached))
+    for item in st.session_state.characters:
+        st.write(f"- {item['name']}: {'3D model ready' if item.get('model_bytes') else 'No GLB model attached'}")
+    st.caption("Use original GLB models you own or have permission to use. Rigged models with embedded animation actions are recommended.")
+    if st.session_state.story:
+        if st.button("Build downloadable 3D production package", type="primary", disabled=(len(attached) == 0)):
+            try:
+                with st.spinner("Packaging story, character models and Blender renderer..."):
+                    bundle = make_production_package(
+                        st.session_state.story, st.session_state.characters,
+                        st.session_state.artwork, video_ratio.split()[0], narration_language
+                    )
+                st.download_button("Download 3D production ZIP", bundle,
+                    file_name="ai-story-studio-3d-production.zip",
+                    mime="application/zip", type="primary")
+                st.success("Production package is ready. Extract it and follow the included README.")
+            except Exception as error:
+                st.error(f"Could not build production package: {error}")
+    else:
+        st.info("Create or load a story first.")
+    st.markdown("**Local render command**")
+    st.code("python render_project.py --language Tamil --ratio 16:9", language="bash")
+    st.caption("This first 3D milestone reuses imported models, adds simple camera and root movement, and renders narration. Text-to-3D generation, facial acting, lip-sync and detailed choreography are future milestones.")
 
 with export_tab:
     if not st.session_state.story:
@@ -554,4 +552,4 @@ with project_tab:
             st.error(f"Could not load project: {error}")
 
 st.divider()
-st.caption("Version 3.3 · Free local scene illustrations + narrated slideshow editor, not a full motion-video generator. Use original stories and properly licensed assets; publishing does not guarantee YouTube monetisation.")
+st.caption("Version 4 · Multi-genre story development, reusable 3D character assets and local Blender production pipeline. Use original stories and properly licensed assets.")
