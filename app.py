@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -38,30 +39,58 @@ Return exactly {count} scenes as valid JSON with this structure:
 Keep character appearance and names consistent in every scene. Return JSON only.
 Do not use copyrighted characters, existing franchises, or celebrity likenesses.
 """
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
-    response = requests.post(
-        url,
-        params={"key": key},
-        json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json"},
-        },
-        timeout=90,
-    )
-    response.raise_for_status()
-    candidates = response.json().get("candidates", [])
-    if not candidates:
-        raise ValueError("Gemini returned no story. Try again or check your API key.")
-    raw = candidates[0]["content"]["parts"][0]["text"].strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-    data = json.loads(raw)
-    if not isinstance(data.get("scenes"), list) or not data["scenes"]:
-        raise ValueError("The generated response did not contain any scenes.")
-    for scene in data["scenes"]:
-        for field in ("heading", "narration", "dialogue", "visual_prompt"):
-            scene.setdefault(field, "")
-    return data
+    # Try the primary model, then a lighter fallback if Google is overloaded.
+    models = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
+    last_error = None
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        for attempt in range(2):
+            try:
+                response = requests.post(
+                    url,
+                    params={"key": key},
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"responseMimeType": "application/json"},
+                    },
+                    timeout=90,
+                )
+                if response.status_code in (429, 500, 502, 503, 504):
+                    last_error = requests.HTTPError(
+                        f"Gemini model {model} is temporarily unavailable "
+                        f"(HTTP {response.status_code}): {response.text[:500]}",
+                        response=response,
+                    )
+                    if attempt == 0:
+                        time.sleep(2)
+                        continue
+                    break
+                response.raise_for_status()
+                candidates = response.json().get("candidates", [])
+                if not candidates:
+                    raise ValueError("Gemini returned no story. Try again or check your API key.")
+                raw = candidates[0]["content"]["parts"][0]["text"].strip()
+                if raw.startswith("```"):
+                    raw = raw.split("\\n", 1)[1].rsplit("```", 1)[0]
+                data = json.loads(raw)
+                if not isinstance(data.get("scenes"), list) or not data["scenes"]:
+                    raise ValueError("The generated response did not contain any scenes.")
+                for scene in data["scenes"]:
+                    for field in ("heading", "narration", "dialogue", "visual_prompt"):
+                        scene.setdefault(field, "")
+                return data
+            except requests.HTTPError as error:
+                status = error.response.status_code if error.response is not None else None
+                if status in (429, 500, 502, 503, 504):
+                    last_error = error
+                    if attempt == 0:
+                        time.sleep(2)
+                        continue
+                    break
+                raise
+    if last_error:
+        raise last_error
+    raise RuntimeError("Gemini could not generate a story. Please try again shortly.")
 
 def render_scene_card(scene, artwork_bytes, width, height, index, total):
     if artwork_bytes:
