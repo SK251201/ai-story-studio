@@ -495,8 +495,8 @@ with storyboard_tab:
     else:
         st.info("Generate realistic 3D storyboard images scene by scene. Generated images are saved into your project and included in narrated MP4 exports.")
         if not pollinations_key.strip():
-            st.warning("To enable AI image generation, add a Pollinations secret key in the sidebar. Image generation uses that account's Pollen balance; it is not guaranteed to be free.")
-            st.markdown("Create/manage a key at https://enter.pollinations.ai/ and set a strict budget before using it.")
+            st.warning("AI image generation needs a Pollinations secret key. On mobile, tap » at the top-left to open the sidebar and enter it under Optional image-generation key.")
+            st.markdown("Create/manage a key at https://enter.pollinations.ai/. Generation requires an available free/earned Pollen balance; do not add payment details if you do not want to spend.")
         character_names = [item["name"] for item in st.session_state.characters]
         for index, scene in enumerate(st.session_state.story["scenes"]):
             with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}", expanded=(index == 0)):
@@ -511,17 +511,24 @@ with storyboard_tab:
                 )
                 col1, col2 = st.columns([1, 1])
                 with col1:
-                    if st.button("Generate realistic image", key=f"generate_image_{index}",
-                                 disabled=not bool(pollinations_key.strip())):
-                        try:
-                            with st.spinner(f"Generating image for scene {index + 1}..."):
-                                st.session_state.artwork[index] = generate_scene_image(
-                                    pollinations_key.strip(), scene, st.session_state.characters,
-                                    visual_style, video_ratio
-                                )
-                            st.success("Scene image generated and saved.")
-                        except Exception as error:
-                            st.error(f"Image generation failed: {error}")
+                    if st.button("Generate realistic image", key=f"generate_image_{index}"):
+                        if not pollinations_key.strip():
+                            st.warning(
+                                "Image generation is not connected yet. Open the sidebar (»), "
+                                "add a Pollinations secret key in 'Optional image-generation key', "
+                                "then click this button again. The key must have image permission "
+                                "and an available free/earned Pollen balance."
+                            )
+                        else:
+                            try:
+                                with st.spinner(f"Generating image for scene {index + 1}..."):
+                                    st.session_state.artwork[index] = generate_scene_image(
+                                        pollinations_key.strip(), scene, st.session_state.characters,
+                                        visual_style, video_ratio
+                                    )
+                                st.success("Scene image generated and saved.")
+                            except Exception as error:
+                                st.error(f"Image generation failed: {error}")
                 with col2:
                     if st.button("Remove generated image", key=f"remove_image_{index}",
                                  disabled=index not in st.session_state.artwork):
