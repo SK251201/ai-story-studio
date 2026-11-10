@@ -159,6 +159,84 @@ def generate_scene_image(scene, characters, visual_style, ratio, progress_callba
         raise RuntimeError("Could not connect to the free image service. Check the app connection and retry.") from error
 
 
+
+def analyze_uploaded_characters(key, image_bytes, mime_type):
+    """Use the user's Gemini key to extract reusable character descriptions from an uploaded image."""
+    prompt = """
+Analyze this uploaded image for distinct visible characters suitable for an original animated video.
+Return JSON only, in this exact structure:
+{"characters":[
+ {"name":"short original name","type":"Human or Animal or Fantasy or Other",
+  "description":"Detailed visible appearance: approximate age range if clearly adult/child, face shape, skin/fur colour, hair, eyes, clothing, body shape, accessories, distinctive visual details and personality only if visually suggested",
+  "visual_prompt":"A full-body cinematic character reference portrait prompt, neutral simple background, same visible outfit and features"}
+]}
+Rules:
+- Identify each clearly distinct character, up to 6. Do not invent hidden people.
+- Do not identify real people or guess names, identity, ethnicity, exact age, or private traits.
+- If the image is a real person, describe only visible non-sensitive appearance and create a fictionalized character description; do not claim the generated result will be an exact likeness.
+- Preserve visible clothing, colours, hairstyle and accessories.
+- If there are no discernible characters, return {"characters":[]}.
+"""
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    payload = {
+        "contents": [{"parts": [
+            {"text": prompt},
+            {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode("ascii")}}
+        ]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}
+    }
+    response = requests.post(url, params={"key": key}, json=payload, timeout=(15, 120))
+    if response.status_code in (429, 500, 502, 503, 504):
+        raise RuntimeError(f"Character image analysis is temporarily unavailable (HTTP {response.status_code}). Try again later.")
+    response.raise_for_status()
+    candidates = response.json().get("candidates", [])
+    if not candidates:
+        raise ValueError("The image analyser could not identify characters in this picture.")
+    raw = candidates[0]["content"]["parts"][0]["text"].strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
+    data = json.loads(raw)
+    items = data.get("characters", []) if isinstance(data, dict) else []
+    if not isinstance(items, list):
+        raise ValueError("The image analyser returned an unexpected result.")
+    cleaned = []
+    for item in items[:6]:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()[:60]
+        description = str(item.get("description", "")).strip()[:1200]
+        if not name or not description:
+            continue
+        kind = str(item.get("type", "Other")).title()
+        if kind not in ("Human", "Animal", "Fantasy", "Other"):
+            kind = "Other"
+        cleaned.append({
+            "name": name,
+            "type": kind,
+            "description": description,
+            "visual_prompt": str(item.get("visual_prompt", "")).strip()[:1200],
+            "asset_file": "",
+            "model_bytes": None,
+            "portrait_base64": "",
+        })
+    return cleaned
+
+
+def generate_character_portrait(character, visual_style, ratio):
+    """Create a single reusable character reference image using free AI Horde workers."""
+    scene = {
+        "heading": f"Character reference portrait: {character.get('name', 'Original character')}",
+        "visual_prompt": (
+            character.get("visual_prompt")
+            or f"Full-body front three-quarter character reference portrait. {character.get('description', '')}. "
+            "Show the complete outfit and body clearly, neutral studio background, standing pose."
+        ),
+        "characters": [character.get("name", "")],
+    }
+    return generate_scene_image(scene, [character], visual_style, ratio)
+
+
+
 def generate_story(key, idea, genre, style, count, characters):
     prompt = f"""
 Create an original {genre} story based on this idea: {idea}
@@ -572,38 +650,148 @@ with story_tab:
         st.write(f"**Scenes:** {len(st.session_state.story.get('scenes', []))}")
 
 with character_tab:
-    st.subheader("Character library")
+    st.subheader("Character Studio")
+    st.caption("Build a reusable cast for nursery rhymes, comedy, stories, animals, fantasy and realistic human videos.")
+
+    st.markdown("#### Create characters from an uploaded picture")
+    reference_image = st.file_uploader(
+        "Upload a picture containing one or more characters",
+        type=["png", "jpg", "jpeg", "webp"], key="character_reference_upload"
+    )
+    st.caption("The picture is analysed with your Gemini API key. Character descriptions are extracted and added to your library. The uploaded picture is sent to Google's Gemini API for analysis; only use images you have permission to use.")
+    if st.button("Automatically extract characters", type="primary",
+                 disabled=(reference_image is None or not bool(api_key.strip()))):
+        try:
+            with st.spinner("Analysing the picture and identifying visible characters..."):
+                mime_type = reference_image.type or "image/jpeg"
+                extracted = analyze_uploaded_characters(
+                    api_key.strip(), reference_image.getvalue(), mime_type
+                )
+            existing = {item.get("name", "").casefold() for item in st.session_state.characters}
+            added = 0
+            for item in extracted:
+                if item["name"].casefold() not in existing:
+                    st.session_state.characters.append(item)
+                    existing.add(item["name"].casefold())
+                    added += 1
+            st.success(f"Extracted {len(extracted)} character(s); added {added} new character(s) to your library.")
+            if not extracted:
+                st.info("No clear characters were detected. Try a picture where the people or characters are visible.")
+        except Exception as error:
+            st.error(f"Character extraction failed: {error}")
+    if reference_image is not None and not api_key.strip():
+        st.warning("Add your Gemini API key in the sidebar to enable automatic character extraction.")
+
+    st.divider()
+    st.markdown("#### Quick character packs")
+    pack_choice = st.selectbox(
+        "Choose a starter cast",
+        ["Nursery rhyme family", "Comedy friends", "Animal adventures", "Fantasy adventure", "Everyday human stories"],
+        key="character_pack_choice"
+    )
+    packs = {
+        "Nursery rhyme family": [
+            ("Aru", "Human", "A cheerful 6-year-old boy with warm brown skin, round expressive face, short wavy black hair, bright blue shirt, mustard shorts and red sneakers. Friendly, curious and energetic."),
+            ("Maya", "Human", "A cheerful 6-year-old girl with warm brown skin, large expressive brown eyes, two neat black braids with yellow ribbons, teal dress and white shoes. Kind and adventurous."),
+            ("Paati", "Human", "A kind grandmother in her late 60s, silver hair in a low bun, gentle face, round glasses, lavender cotton saree and a warm smile."),
+            ("Kutti", "Animal", "A small fluffy golden puppy with floppy ears, round dark eyes, a green collar and a playful friendly expression."),
+            ("Mittu", "Animal", "A bright green parrot with a yellow chest, red curved beak and expressive eyes, curious and funny.")
+        ],
+        "Comedy friends": [
+            ("Karthik", "Human", "A slim young adult man with medium brown skin, expressive eyebrows, short curly black hair, checked shirt, dark jeans and comic overconfident expressions."),
+            ("Bala", "Human", "A cheerful stocky young adult man with medium brown skin, round face, short black hair, orange polo shirt and playful confused expressions."),
+            ("Boss Kumar", "Human", "A middle-aged office manager with neatly combed black hair, rectangular glasses, moustache, pale blue formal shirt and stern but funny expressions."),
+            ("Pechu", "Animal", "A mischievous small grey monkey with expressive eyes, a tiny red scarf and clever comic body language.")
+        ],
+        "Animal adventures": [
+            ("Raja", "Animal", "A friendly young golden lion with soft detailed golden fur, expressive amber eyes and a gentle brave personality."),
+            ("Mimi", "Animal", "A small white rabbit with soft fur, pink inner ears, bright eyes and a sky-blue scarf."),
+            ("Koko", "Animal", "A colourful tropical parrot with emerald green feathers, yellow chest and red beak."),
+            ("Toby", "Animal", "A playful brown bear cub with detailed soft fur, round ears and a red neckerchief.")
+        ],
+        "Fantasy adventure": [
+            ("Aadi", "Human", "A brave teenage adventurer with medium brown skin, tousled black hair, navy tunic, leather shoulder strap and a determined expression."),
+            ("Luna", "Fantasy", "A young moon guardian with silver-blue hair, luminous pale-blue eyes, flowing midnight-blue cloak and subtle magical star details."),
+            ("Ember", "Fantasy", "A small friendly fire dragon with deep red scales, golden eyes, tiny horns and softly glowing orange wing membranes."),
+            ("Moss", "Fantasy", "A gentle forest spirit with leaf-textured green hair, warm amber eyes and natural moss-green clothing.")
+        ],
+        "Everyday human stories": [
+            ("Arun", "Human", "A young adult man with medium brown skin, short black hair, navy casual shirt, dark trousers and a thoughtful expression."),
+            ("Priya", "Human", "A young adult woman with medium brown skin, long dark hair, expressive brown eyes, simple teal kurta and a confident warm expression."),
+            ("Amma", "Human", "A middle-aged mother with medium brown skin, dark hair tied back, simple cotton saree and a caring expression."),
+            ("Teacher Meena", "Human", "A friendly female teacher in her 30s with medium brown skin, dark hair tied back, rectangular glasses and a neat pastel salwar suit.")
+        ],
+    }
+    if st.button("Add this character pack", key="add_character_pack"):
+        existing = {item.get("name", "").casefold() for item in st.session_state.characters}
+        added = 0
+        for name, kind, description in packs[pack_choice]:
+            if name.casefold() not in existing:
+                st.session_state.characters.append({
+                    "name": name, "type": kind, "description": description,
+                    "asset_file": "", "model_bytes": None, "portrait_base64": "",
+                    "visual_prompt": ""
+                })
+                existing.add(name.casefold())
+                added += 1
+        st.success(f"Added {added} original characters. Generate portraits below when needed.")
+
+    st.divider()
+    st.markdown("#### Add a character manually")
     with st.form("add_character", clear_on_submit=True):
         character_name = st.text_input("Character name")
         character_description = st.text_area("Appearance, personality and defining details",
-                placeholder="Age, face, hairstyle, skin tone, outfit, body shape, personality and signature details")
+                placeholder="Age range, face, hairstyle, skin tone, outfit, body shape, personality and signature details")
         character_type = st.selectbox("Character type", ["Human", "Animal", "Fantasy", "Other"])
         add_character = st.form_submit_button("Add character")
     if add_character:
         if character_name.strip() and character_description.strip():
             st.session_state.characters.append({
-                "name": character_name.strip(),
-                "description": character_description.strip(),
-                "type": character_type,
-                "asset_file": "",
-                "model_bytes": None,
+                "name": character_name.strip(), "description": character_description.strip(),
+                "type": character_type, "asset_file": "", "model_bytes": None,
+                "portrait_base64": "", "visual_prompt": ""
             })
             st.success("Character added.")
         else:
             st.warning("Enter both a name and description.")
+
+    st.divider()
+    st.markdown(f"#### Your reusable cast ({len(st.session_state.characters)} characters)")
     for index, character in enumerate(st.session_state.characters):
-        st.markdown(f"**{character['name']}** ({character.get('type', 'Character')}) — {character['description']}")
-        model_upload = st.file_uploader("Upload rigged 3D character model (.glb or .fbx)", type=["glb", "fbx"], key=f"character_model_{index}")
-        if model_upload:
-            safe_name = "".join(ch.lower() if ch.isalnum() else "_" for ch in character["name"]).strip("_")
-            character["asset_file"] = (safe_name or f"character_{index}") + Path(model_upload.name).suffix.lower()
-            character["model_bytes"] = model_upload.getvalue()
-            st.success(f"3D model attached: {character['asset_file']}")
-        elif character.get("model_bytes"):
-            st.caption(f"3D model attached: {character.get('asset_file')}")
-        if st.button("Remove", key=f"remove_character_{index}"):
-            st.session_state.characters.pop(index)
-            st.rerun()
+        with st.expander(f"{character.get('name', 'Character')} · {character.get('type', 'Character')}", expanded=(index == 0)):
+            if character.get("portrait_base64"):
+                try:
+                    st.image(base64.b64decode(character["portrait_base64"]), caption="Saved character reference portrait", width=260)
+                except Exception:
+                    pass
+            st.write(character.get("description", ""))
+            portrait_col, model_col = st.columns(2)
+            with portrait_col:
+                if st.button("Generate free character portrait", key=f"character_portrait_{index}"):
+                    try:
+                        with st.spinner("Waiting for a free community image worker..."):
+                            portrait = generate_character_portrait(character, visual_style, video_ratio)
+                        character["portrait_base64"] = base64.b64encode(portrait).decode("ascii")
+                        save_history_snapshot()
+                        st.success("Character portrait saved to your reusable library.")
+                        st.rerun()
+                    except Exception as error:
+                        st.error(f"Portrait generation failed: {error}")
+            with model_col:
+                model_upload = st.file_uploader(
+                    "Attach rigged 3D model (.glb or .fbx)", type=["glb", "fbx"],
+                    key=f"character_model_{index}"
+                )
+                if model_upload:
+                    safe_name = "".join(ch.lower() if ch.isalnum() else "_" for ch in character["name"]).strip("_")
+                    character["asset_file"] = (safe_name or f"character_{index}") + Path(model_upload.name).suffix.lower()
+                    character["model_bytes"] = model_upload.getvalue()
+                    st.success(f"3D model attached: {character['asset_file']}")
+                elif character.get("model_bytes"):
+                    st.caption(f"3D model attached: {character.get('asset_file')}")
+            if st.button("Remove character", key=f"remove_character_{index}"):
+                st.session_state.characters.pop(index)
+                st.rerun()
 
 with storyboard_tab:
     if not st.session_state.story:
@@ -849,4 +1037,4 @@ with history_tab:
             st.error(f"Could not restore history: {error}")
 
 st.divider()
-st.caption("Version 4.3 · Faster free community image generation, creation history, reusable characters, reusable characters, 3D production tools and YouTube-ready exports.")
+st.caption("Version 4.4 · Character Studio, image-to-character extraction, reusable character packs and free portrait generation, reusable characters, 3D production tools and YouTube-ready exports.")
