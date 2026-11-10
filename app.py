@@ -29,64 +29,101 @@ def get_secret_key():
         return os.getenv("GEMINI_API_KEY", "")
 
 
-def get_pollinations_key():
-    try:
-        return st.secrets.get("POLLINATIONS_API_KEY", "") or os.getenv("POLLINATIONS_API_KEY", "")
-    except Exception:
-        return os.getenv("POLLINATIONS_API_KEY", "")
-
-def generate_scene_image(api_key, scene, characters, visual_style, ratio):
-    """Generate one cinematic storyboard image. The provider may charge Pollen per image."""
-    from urllib.parse import quote
-
+def generate_scene_image(scene, characters, visual_style, ratio, progress_callback=None):
+    """Free community-hosted image generation through anonymous AI Horde workers."""
     cast = scene.get("characters", [])
-    character_notes = []
-    for character in characters:
-        if character.get("name") in cast:
-            character_notes.append(
-                f"{character['name']}: {character.get('description', '')}"
-            )
-    cast_text = "; ".join(character_notes) or "Use the character details stated in the shot direction."
+    character_notes = [
+        f"{item.get('name')}: {item.get('description', '')}"
+        for item in characters if item.get("name") in cast
+    ]
+    cast_text = "; ".join(character_notes) or "Follow the original character descriptions in the scene."
     prompt = (
-        "Create one polished, high-detail cinematic 3D animated film frame for an original YouTube story. "
-        "Realistic appealing character anatomy, expressive natural faces, detailed clothing and materials, "
-        "beautiful professional 3D environment, physically based textures, soft cinematic global illumination, "
-        "professional film lighting, rich but natural colors, clear composition, crisp focus, premium family-film quality. "
-        "Do not make a flat vector drawing, stick figure, simple cartoon, collage, storyboard sheet, text, logo or watermark. "
-        f"Visual style: {visual_style}. Character continuity bible: {cast_text}. "
-        f"Scene: {scene.get('heading', '')}. Shot direction: {scene.get('visual_prompt', '')}. "
-        "Show one coherent moment with all named characters looking consistent with their descriptions. "
-        "Keep faces and full bodies visible where framing allows. No captions or written words."
+        "Premium cinematic 3D animated family film frame, polished realistic 3D rendering, "
+        "believable human or animal anatomy, expressive natural faces, detailed hair and clothing, "
+        "high quality physically based materials, realistic skin and fur textures, detailed environment, "
+        "professional cinematography, soft global illumination, natural shadows, rich but balanced colors, "
+        "beautiful composition, crisp focus, high detail. "
+        f"Visual direction: {visual_style}. Character continuity: {cast_text}. "
+        f"Scene: {scene.get('heading', '')}. Action and camera: {scene.get('visual_prompt', '')}. "
+        "One single coherent cinematic frame, original characters only, consistent face, hairstyle, "
+        "clothing and colors, clear readable action, no text, no logo, no watermark, no collage."
     )
-    url = "https://gen.pollinations.ai/image/" + quote(prompt, safe="")
-    response = requests.get(
-        url,
-        params={
-            "model": "black-forest-labs/flux.1-schnell",
-            "width": 1024,
-            "height": 1024,
-            "safe": "privacy",
+    negative = (
+        "flat vector, stick figure, crude cartoon, low quality, blurry, pixelated, bad anatomy, "
+        "extra fingers, extra limbs, duplicated people, distorted face, text, subtitles, logo, watermark"
+    )
+    if ratio.startswith("9:16"):
+        width, height = 640, 1024
+    else:
+        width, height = 1024, 576
+    headers = {
+        "apikey": "0000000000",
+        "Client-Agent": "AI-Story-Studio:4.2:community-free",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "prompt": prompt + " ### " + negative,
+        "params": {
+            "sampler_name": "k_euler_a",
+            "cfg_scale": 7.5,
+            "steps": 25,
+            "width": width,
+            "height": height,
+            "n": 1,
         },
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=(20, 180),
-    )
-    if response.status_code == 402:
-        raise RuntimeError("Your Pollinations Pollen balance is insufficient. No further image was generated.")
-    if response.status_code == 429:
-        raise RuntimeError("Image service rate limit reached. Wait before trying again.")
-    if response.status_code in (401, 403):
-        raise RuntimeError("Pollinations rejected the API key. Check that it is a valid secret key with image permission.")
-    response.raise_for_status()
-    content_type = response.headers.get("Content-Type", "")
-    if not content_type.startswith("image/"):
-        raise RuntimeError("The image provider returned a non-image response.")
-    image_bytes = response.content
+        "models": ["AlbedoBase XL (SDXL)"],
+        "nsfw": False,
+        "censor_nsfw": True,
+        "r2": True,
+        "shared": True,
+    }
+    base = "https://stablehorde.net/api/v2"
     try:
-        with Image.open(BytesIO(image_bytes)) as image:
-            image.verify()
-    except Exception as error:
-        raise RuntimeError("The image provider returned an invalid image file.") from error
-    return image_bytes
+        submitted = requests.post(
+            base + "/generate/async", headers=headers, json=payload, timeout=(15, 45)
+        )
+        if submitted.status_code == 429:
+            raise RuntimeError("AI Horde's free anonymous request limit is busy. Wait a little and retry.")
+        submitted.raise_for_status()
+        request_id = submitted.json().get("id")
+        if not request_id:
+            raise RuntimeError("The free image service did not return a job ID.")
+        deadline = time.time() + 480
+        while time.time() < deadline:
+            status_response = requests.get(
+                base + f"/generate/status/{request_id}", headers=headers, timeout=(15, 45)
+            )
+            status_response.raise_for_status()
+            status_data = status_response.json()
+            if status_data.get("faulted"):
+                raise RuntimeError("The volunteer image worker could not complete this request. Please retry.")
+            if status_data.get("done"):
+                generations = status_data.get("generations") or []
+                if not generations:
+                    raise RuntimeError("The image job finished without returning an image.")
+                image_value = generations[0].get("img", "")
+                if image_value.startswith("http://") or image_value.startswith("https://"):
+                    image_response = requests.get(image_value, timeout=(15, 90))
+                    image_response.raise_for_status()
+                    image_bytes = image_response.content
+                else:
+                    image_bytes = base64.b64decode(image_value)
+                try:
+                    with Image.open(BytesIO(image_bytes)) as image:
+                        image.verify()
+                except Exception as error:
+                    raise RuntimeError("The free image service returned an invalid image.") from error
+                return image_bytes
+            if progress_callback:
+                queue = status_data.get("queue_position", "?")
+                wait = status_data.get("wait_time", 0)
+                progress_callback(queue, wait)
+            time.sleep(5)
+        raise TimeoutError("The free community queue is taking too long. Your app is still free; try again later.")
+    except requests.exceptions.Timeout as error:
+        raise RuntimeError("The free image service timed out. Please retry.") from error
+    except requests.exceptions.ConnectionError as error:
+        raise RuntimeError("Could not connect to the free image service. Check the app connection and retry.") from error
 
 
 def generate_story(key, idea, genre, style, count, characters):
@@ -404,11 +441,8 @@ with st.sidebar:
     st.header("Project settings")
     api_key = st.text_input("Gemini API key", value=get_secret_key(), type="password")
     st.caption("Use Streamlit Secrets for deployment. Never commit your key to GitHub.")
-    pollinations_key = st.text_input(
-        "Optional image-generation key", value=get_pollinations_key(), type="password",
-        help="Pollinations secret key. Image generation uses your Pollinations Pollen balance."
-    )
-    st.caption("Image generation is optional. It is not unlimited-free: use only free/earned Pollen or set a strict zero/low budget on your provider key. No images are generated automatically.")
+    st.success("AI images: FREE community generation. No image API key or payment details required.")
+    st.caption("Images are created by volunteer AI Horde computers. Anonymous requests may wait in a queue; availability is not guaranteed.")
     genre = st.selectbox("Content type", ["Tamil nursery rhyme / kids song", "Comedy", "Moral story",
                                    "Bedtime story", "Adventure", "Educational", "Fantasy",
                                    "Animal story", "Family story", "Mystery", "Sci-fi",
@@ -494,9 +528,7 @@ with storyboard_tab:
         st.info("Generate or load a project to edit its storyboard.")
     else:
         st.info("Generate realistic 3D storyboard images scene by scene. Generated images are saved into your project and included in narrated MP4 exports.")
-        if not pollinations_key.strip():
-            st.warning("AI image generation needs a Pollinations secret key. On mobile, tap » at the top-left to open the sidebar and enter it under Optional image-generation key.")
-            st.markdown("Create/manage a key at https://enter.pollinations.ai/. Generation requires an available free/earned Pollen balance; do not add payment details if you do not want to spend.")
+        st.success("Free AI image generation is built in. No API key or payment is needed.")
         character_names = [item["name"] for item in st.session_state.characters]
         for index, scene in enumerate(st.session_state.story["scenes"]):
             with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}", expanded=(index == 0)):
@@ -511,24 +543,21 @@ with storyboard_tab:
                 )
                 col1, col2 = st.columns([1, 1])
                 with col1:
-                    if st.button("Generate realistic image", key=f"generate_image_{index}"):
-                        if not pollinations_key.strip():
-                            st.warning(
-                                "Image generation is not connected yet. Open the sidebar (»), "
-                                "add a Pollinations secret key in 'Optional image-generation key', "
-                                "then click this button again. The key must have image permission "
-                                "and an available free/earned Pollen balance."
-                            )
-                        else:
-                            try:
-                                with st.spinner(f"Generating image for scene {index + 1}..."):
-                                    st.session_state.artwork[index] = generate_scene_image(
-                                        pollinations_key.strip(), scene, st.session_state.characters,
-                                        visual_style, video_ratio
-                                    )
-                                st.success("Scene image generated and saved.")
-                            except Exception as error:
-                                st.error(f"Image generation failed: {error}")
+                    if st.button("Generate realistic image", key=f"generate_image_{index}", type="primary"):
+                        try:
+                            status_box = st.status("Connecting to free community image workers...", expanded=True)
+                            progress_line = status_box.empty()
+                            def update_image_progress(queue, wait):
+                                progress_line.write(f"Free worker queue position: {queue} · Estimated wait: {wait} seconds")
+                            with status_box:
+                                st.session_state.artwork[index] = generate_scene_image(
+                                    scene, st.session_state.characters, visual_style, video_ratio,
+                                    progress_callback=update_image_progress
+                                )
+                                status_box.update(label="Image generated and saved to this project.", state="complete")
+                            st.rerun()
+                        except Exception as error:
+                            st.error(f"Free image generation failed: {error}")
                 with col2:
                     if st.button("Remove generated image", key=f"remove_image_{index}",
                                  disabled=index not in st.session_state.artwork):
@@ -539,7 +568,7 @@ with storyboard_tab:
                     st.session_state.artwork[index] = uploaded.getvalue()
                 if index in st.session_state.artwork:
                     st.image(st.session_state.artwork[index], use_container_width=True)
-        st.caption("Images are stored in the project JSON and used as scene backgrounds in narrated MP4 exports. Character descriptions guide consistency, but an image model may still vary faces/outfits between scenes.")
+        st.caption("Generated images are saved in your project and used in MP4 exports. Free volunteer workers can be busy, so generation may take several minutes. Anonymous requests are shared with the community service; do not submit private photos or personal information. Character likeness consistency is best-effort.")
 
 with production_tab:
     st.subheader("3D animated production package")
@@ -683,4 +712,4 @@ with project_tab:
             st.error(f"Could not load project: {error}")
 
 st.divider()
-st.caption("Version 4 · Multi-genre story development, reusable 3D character assets and local Blender production pipeline. Use original stories and properly licensed assets.")
+st.caption("Version 4.2 · Multi-genre story studio with free community-powered AI images, reusable characters, 3D production tools and YouTube-ready exports.")
