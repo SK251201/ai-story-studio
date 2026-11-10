@@ -104,17 +104,16 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
 
 
 def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
-    """Generate one scene illustration with Gemini image generation."""
+    """Generate one scene illustration with Gemini's documented native image API."""
     visual_ratio = "9:16" if ratio.startswith("9:16") else "16:9"
     instruction = (
         f"Create one high-quality {style} illustration for a YouTube story scene. "
         f"Composition must be {visual_ratio}. Scene: {prompt}. "
         "Use cinematic composition, expressive but family-friendly characters, "
-        "clear readable visual storytelling, and no captions, logos, watermarks, "
-        "borders, or written text. "
-        "If a reference image is supplied, preserve the main character's face, "
-        "hair, clothing, age, colors, and proportions exactly; only change the "
-        "pose, action, camera angle, and background to fit this scene."
+        "clear visual storytelling, and no captions, logos, watermarks, borders, or text. "
+        "If a reference image is supplied, preserve the main character's identity, face, "
+        "hair, clothing, age, colors, and proportions; change only pose, action, camera "
+        "angle, and background to fit this scene."
     )
     parts = [{"text": instruction}]
     if reference_bytes:
@@ -127,16 +126,19 @@ def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
                 "data": base64.b64encode(ref_buffer.getvalue()).decode("ascii"),
             }
         })
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
+
+    # Use the model ID and REST request structure shown in Google's image-generation guide.
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent"
     response = requests.post(
         url,
         params={"key": key},
         json={
             "contents": [{"parts": parts}],
             "generationConfig": {
-                "responseModalities": ["IMAGE"],
-                "responseFormat": {
-                    "image": {"aspectRatio": visual_ratio, "imageSize": "1K"}
+                "responseModalities": ["TEXT", "IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": visual_ratio,
+                    "imageSize": "1K",
                 },
             },
         },
@@ -145,12 +147,17 @@ def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
     response.raise_for_status()
     candidates = response.json().get("candidates", [])
     if not candidates:
-        raise ValueError("Gemini returned no image. Please try again.")
+        raise ValueError("Gemini returned no image. Check image-model access and API quota.")
     for part in candidates[0].get("content", {}).get("parts", []):
         image_data = part.get("inline_data") or part.get("inlineData")
         if image_data and image_data.get("data"):
-            return base64.b64decode(image_data["data"])
-    raise ValueError("Gemini response did not contain an image. Check model access and API quota.")
+            image_bytes = base64.b64decode(image_data["data"])
+            Image.open(BytesIO(image_bytes)).verify()
+            return image_bytes
+    raise ValueError(
+        "Gemini returned no image data. Your API key may not have access to this image model, "
+        "or image generation may require billing to be enabled."
+    )
 
 
 YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
