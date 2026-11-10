@@ -361,7 +361,7 @@ with character_tab:
         character_name = st.text_input("Character name")
         character_description = st.text_area("Appearance, personality and defining details",
                 placeholder="Age, face, hairstyle, skin tone, outfit, body shape, personality and signature details")
-                    character_type = st.selectbox("Character type", ["Human", "Animal", "Fantasy", "Other"])
+        character_type = st.selectbox("Character type", ["Human", "Animal", "Fantasy", "Other"])
         add_character = st.form_submit_button("Add character")
     if add_character:
         if character_name.strip() and character_description.strip():
