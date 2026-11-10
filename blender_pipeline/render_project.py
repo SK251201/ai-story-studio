@@ -46,6 +46,17 @@ def main():
         for index, item in enumerate(scenes):
             names = item.get("characters") or list(assets.keys())
             names = [name for name in names if name in assets] or list(assets.keys())[:1]
+            narration = " ".join(x for x in (item.get("narration",""),item.get("dialogue","")) if x).strip()
+            narration = narration or item.get("heading","Scene")
+            audio = work / f"voice_{index:03d}.mp3"
+            gTTS(text=narration, lang=lang).save(str(audio))
+            # Estimate narration duration so the animation does not cut off long dialogue.
+            probe = subprocess.run([ffmpeg, "-i", str(audio), "-f", "null", "-"],
+                                   capture_output=True, text=True)
+            import re
+            match = re.search(r"Duration: (\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", probe.stderr)
+            audio_seconds = (int(match.group(1))*3600 + int(match.group(2))*60 + float(match.group(3))) if match else args.seconds_per_scene
+            frames = max(frames, int((audio_seconds + 0.8) * args.fps))
             shot = {"assets":assets, "character_names":names, "heading":item.get("heading",""),
                     "visual_prompt":item.get("visual_prompt",""), "frame_end":frames,
                     "width":width, "height":height, "fps":args.fps}
@@ -55,11 +66,7 @@ def main():
             run = subprocess.run([blender,"--background","--python",str(HERE/"render_scene.py"),
                                   "--",str(shot_json),str(prefix)],capture_output=True,text=True)
             if run.returncode:
-                raise SystemExit(f"Blender failed on scene {index+1}:\n{run.stderr[-5000:]}")
-            narration = " ".join(x for x in (item.get("narration",""),item.get("dialogue","")) if x).strip()
-            narration = narration or item.get("heading","Scene")
-            audio = work / f"voice_{index:03d}.mp3"
-            gTTS(text=narration, lang=lang).save(str(audio))
+                raise SystemExit(f"Blender failed on scene {index+1}:\\n{run.stderr[-5000:]}")
             clip = work / f"clip_{index:03d}.mp4"
             encode = [ffmpeg,"-y","-framerate",str(args.fps),"-i",str(prefix)+"%04d.png",
                       "-i",str(audio),"-vf",f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
