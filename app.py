@@ -38,7 +38,7 @@ Return exactly {count} scenes as valid JSON with this structure:
 Keep character appearance and names consistent in every scene. Return JSON only.
 Do not use copyrighted characters, existing franchises, or celebrity likenesses.
 """
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     response = requests.post(
         url,
         params={"key": key},
