@@ -131,7 +131,7 @@ def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent"
     response = requests.post(
         url,
-        params={"key": key},
+        headers={"x-goog-api-key": key},
         json={
             "contents": [{"parts": parts}],
             "generationConfig": {
@@ -417,22 +417,26 @@ with storyboard_tab:
             else:
                 progress = st.progress(0, text="Preparing scene artwork...")
                 try:
-                    for image_index, image_scene in enumerate(st.session_state.story["scenes"]):
+                    scenes = st.session_state.story["scenes"]
+                    total_scenes = len(scenes)
+                    for image_index, image_scene in enumerate(scenes):
+                        if image_index in st.session_state.artwork:
+                            progress.progress((image_index + 1) / total_scenes,
+                                              text=f"Keeping existing artwork for scene {image_index + 1}")
+                            continue
                         reference = st.session_state.artwork.get(0) if image_index > 0 else None
                         scene_prompt = image_scene.get("visual_prompt") or image_scene.get("heading", "Story scene")
-                        with st.spinner(f"Generating artwork for scene {image_index + 1} of {len(st.session_state.story['scenes'])}..."):
+                        with st.spinner(f"Generating artwork for scene {image_index + 1} of {total_scenes}..."):
                             st.session_state.artwork[image_index] = generate_scene_image(
                                 api_key.strip(), scene_prompt, visual_style, video_ratio, reference
                             )
-                        if image_index == 0:
-                            reference = st.session_state.artwork[0]
-                        progress.progress(
-                            (image_index + 1) / len(st.session_state.story["scenes"]),
-                            text=f"Generated scene {image_index + 1} of {len(st.session_state.story['scenes'])}"
-                        )
-                    st.success("Artwork generated for all scenes. Review each image below.")
+                        progress.progress((image_index + 1) / total_scenes,
+                                          text=f"Generated scene {image_index + 1} of {total_scenes}")
+                        if image_index < total_scenes - 1:
+                            time.sleep(6)
+                    st.success("Artwork generation finished. Review each image below.")
                 except Exception as error:
-                    st.error(f"Artwork generation stopped: {error}")
+                    st.error(f"Artwork generation paused: {error} Previously generated images are kept. Click again later to continue.")
         for index, scene in enumerate(st.session_state.story["scenes"]):
             with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}", expanded=(index == 0)):
                 scene["heading"] = st.text_input(
