@@ -3,7 +3,7 @@
 This is a local companion to the Streamlit app. Blender renders require a desktop or dedicated render machine; Streamlit Community Cloud is not suitable for running Blender.
 
 ## Current capabilities
-- Imports original user-owned GLB/glTF character models into Blender.
+- Imports original user-owned GLB/glTF or FBX character models into Blender.
 - Reuses the same model across shots to maintain visual identity.
 - Creates a 3-point-lit studio stage and cinematic camera.
 - Adds simple root and camera movement between keyframes.
