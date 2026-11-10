@@ -80,12 +80,46 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
                 if raw.startswith("```"):
                     raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
                 data = json.loads(raw)
-                if not isinstance(data.get("scenes"), list) or not data["scenes"]:
+                # Some model responses return each scene as a list instead of an object.
+                # Normalize every item so downstream editors always receive dictionaries.
+                if isinstance(data, list):
+                    data = {"title": "Untitled story", "logline": "", "scenes": data}
+                if not isinstance(data, dict):
+                    raise ValueError("Gemini returned an invalid story structure. Please try again.")
+                scenes = data.get("scenes")
+                if not isinstance(scenes, list) or not scenes:
                     raise ValueError("The generated response did not contain any scenes.")
-                for scene in data["scenes"]:
+                normalized_scenes = []
+                fields = ("heading", "narration", "dialogue", "visual_prompt", "characters")
+                for scene_index, scene in enumerate(scenes):
+                    if isinstance(scene, dict):
+                        normalized = scene.copy()
+                    elif isinstance(scene, list):
+                        # Support positional scene data as a fallback.
+                        if len(scene) == 1 and isinstance(scene[0], dict):
+                            normalized = scene[0].copy()
+                        else:
+                            normalized = {
+                                field: scene[pos] if pos < len(scene) else ""
+                                for pos, field in enumerate(fields)
+                            }
+                    elif isinstance(scene, str):
+                        normalized = {"heading": f"Scene {scene_index + 1}", "narration": scene}
+                    else:
+                        normalized = {"heading": f"Scene {scene_index + 1}", "narration": str(scene)}
                     for field in ("heading", "narration", "dialogue", "visual_prompt"):
-                        scene.setdefault(field, "")
-                    scene.setdefault("characters", [])
+                        value = normalized.get(field, "")
+                        normalized[field] = value if isinstance(value, str) else str(value or "")
+                    names = normalized.get("characters", [])
+                    if isinstance(names, str):
+                        names = [names] if names.strip() else []
+                    elif not isinstance(names, list):
+                        names = []
+                    normalized["characters"] = [str(name) for name in names if name]
+                    normalized_scenes.append(normalized)
+                data["scenes"] = normalized_scenes
+                data.setdefault("title", "Untitled story")
+                data.setdefault("logline", "")
                 return data
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as error:
                 last_error = error
