@@ -104,7 +104,7 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
 
 
 def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
-    """Generate one scene illustration with Gemini's documented native image API."""
+    """Generate one scene image with bounded retries for temporary rate limits."""
     visual_ratio = "9:16" if ratio.startswith("9:16") else "16:9"
     instruction = (
         f"Create one high-quality {style} illustration for a YouTube story scene. "
@@ -127,37 +127,63 @@ def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
             }
         })
 
-    # Use the model ID and REST request structure shown in Google's image-generation guide.
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent"
-    response = requests.post(
-        url,
-        headers={"x-goog-api-key": key},
-        json={
-            "contents": [{"parts": parts}],
-            "generationConfig": {
-                "responseModalities": ["TEXT", "IMAGE"],
-                "imageConfig": {
-                    "aspectRatio": visual_ratio,
-                    "imageSize": "1K",
+    for attempt in range(3):
+        response = requests.post(
+            url,
+            headers={"x-goog-api-key": key},
+            json={
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "responseModalities": ["TEXT", "IMAGE"],
+                    "imageConfig": {"aspectRatio": visual_ratio, "imageSize": "1K"},
                 },
             },
-        },
-        timeout=(20, 240),
-    )
-    response.raise_for_status()
-    candidates = response.json().get("candidates", [])
-    if not candidates:
-        raise ValueError("Gemini returned no image. Check image-model access and API quota.")
-    for part in candidates[0].get("content", {}).get("parts", []):
-        image_data = part.get("inline_data") or part.get("inlineData")
-        if image_data and image_data.get("data"):
-            image_bytes = base64.b64decode(image_data["data"])
-            Image.open(BytesIO(image_bytes)).verify()
-            return image_bytes
-    raise ValueError(
-        "Gemini returned no image data. Your API key may not have access to this image model, "
-        "or image generation may require billing to be enabled."
-    )
+            timeout=(20, 240),
+        )
+        if response.ok:
+            candidates = response.json().get("candidates", [])
+            if not candidates:
+                raise ValueError("Gemini returned no image. Check image-model access and API quota.")
+            for part in candidates[0].get("content", {}).get("parts", []):
+                image_data = part.get("inline_data") or part.get("inlineData")
+                if image_data and image_data.get("data"):
+                    image_bytes = base64.b64decode(image_data["data"])
+                    Image.open(BytesIO(image_bytes)).verify()
+                    return image_bytes
+            raise ValueError("Gemini returned no image data. Check image-model access and billing.")
+
+        if response.status_code == 429:
+            try:
+                detail = response.json().get("error", {}).get("message", "Image quota or rate limit reached.")
+            except Exception:
+                detail = "Image quota or rate limit reached."
+            lowered = detail.lower()
+            if "perday" in lowered or "per day" in lowered or "quota exceeded" in lowered:
+                raise RuntimeError(
+                    "Google's image-generation quota for this project is exhausted. "
+                    "Wait for the quota to reset or review billing and limits in Google AI Studio. "
+                    "Images already generated are preserved."
+                )
+            if attempt < 2:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    wait_seconds = min(60, max(5, int(retry_after))) if retry_after else 8 * (attempt + 1)
+                except ValueError:
+                    wait_seconds = 8 * (attempt + 1)
+                time.sleep(wait_seconds)
+                continue
+            raise RuntimeError("Google is rate-limiting image generation. Wait a few minutes and try again.")
+        if response.status_code in (500, 502, 503, 504) and attempt < 2:
+            time.sleep(5 * (attempt + 1))
+            continue
+        try:
+            detail = response.json().get("error", {}).get("message", "Request failed.")
+        except Exception:
+            detail = "Request failed."
+        raise RuntimeError(f"Gemini image request failed (HTTP {response.status_code}): {detail[:400]}")
+
+    raise RuntimeError("Image generation failed after retries. Please try again later.")
 
 
 YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
