@@ -4,6 +4,7 @@ import os
 import subprocess
 import tempfile
 import time
+import zipfile
 from io import BytesIO
 from pathlib import Path
 
@@ -101,69 +102,6 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
     if last_error:
         raise last_error
     raise RuntimeError("Gemini could not generate a story. Please try again shortly.")
-
-
-def generate_free_scene_image(prompt, style, ratio, scene_index=0):
-    """Render a simple original vector-style scene locally with Pillow; no image API."""
-    vertical = ratio.startswith("9:16")
-    width, height = (576, 1024) if vertical else (1024, 576)
-    image = Image.new("RGB", (width, height))
-    draw = ImageDraw.Draw(image)
-    seed = sum(ord(ch) for ch in (prompt or "")) + scene_index * 97
-    palettes = [
-        ((112, 184, 230), (231, 241, 250), (89, 157, 112)),
-        ((246, 180, 112), (255, 224, 173), (79, 139, 104)),
-        ((92, 120, 174), (190, 207, 230), (65, 100, 117)),
-        ((126, 174, 157), (218, 235, 216), (89, 135, 100)),
-    ]
-    sky, horizon, ground = palettes[seed % len(palettes)]
-    for y in range(height):
-        t = y / max(1, height - 1)
-        color = tuple(int(sky[i] * (1 - t) + horizon[i] * t) for i in range(3))
-        draw.line((0, y, width, y), fill=color)
-    sun_x = int(width * (0.78 if seed % 2 else 0.18))
-    draw.ellipse((sun_x-width*.055, height*.09, sun_x+width*.055, height*.20), fill=(255, 224, 128))
-    for cx, cy in ((.22, .19), (.67, .25)):
-        x, y = int(width*cx), int(height*cy)
-        radius = max(18, int(width*.035))
-        for ox, oy in ((0, 0), (radius, -radius//3), (2*radius, 0)):
-            draw.ellipse((x+ox-radius, y+oy-radius, x+ox+radius, y+oy+radius), fill=(248, 250, 252))
-    draw.polygon([(0, int(height*.62)), (int(width*.22), int(height*.40)),
-                  (int(width*.43), int(height*.63)), (int(width*.68), int(height*.42)),
-                  (width, int(height*.62)), (width, height), (0, height)], fill=ground)
-    draw.rectangle((0, int(height*.76), width, height), fill=(87, 145, 91))
-    text = (prompt or "").lower()
-    if any(word in text for word in ("school", "class", "teacher", "student")):
-        bx, by = int(width*.67), int(height*.47)
-        bw, bh = int(width*.25), int(height*.22)
-        draw.rectangle((bx, by, bx+bw, by+bh), fill=(244, 207, 145), outline=(88, 73, 66), width=4)
-        draw.polygon([(bx-12, by), (bx+bw//2, by-int(height*.11)), (bx+bw+12, by)],
-                     fill=(171, 76, 67), outline=(88, 73, 66))
-        draw.rectangle((bx+bw*.42, by+bh*.48, bx+bw*.62, by+bh), fill=(101, 75, 63))
-    elif any(word in text for word in ("forest", "tree", "jungle", "park")):
-        for tx in (.12, .84):
-            x, y = int(width*tx), int(height*.56)
-            draw.rectangle((x-width*.012, y, x+width*.012, int(height*.78)), fill=(103, 74, 48))
-            draw.ellipse((x-width*.075, y-height*.13, x+width*.075, y+height*.05), fill=(44, 112, 76))
-    cx, cy = int(width*(.38 + (scene_index % 3)*.035)), int(height*.68)
-    head_r = int(width*.047)
-    skin = (235, 181, 143)
-    shirt = [(59,107,184), (196,89,83), (89,151,117), (135,102,176)][seed % 4]
-    draw.ellipse((cx-head_r, cy-int(height*.30)-head_r, cx+head_r, cy-int(height*.30)+head_r),
-                 fill=skin, outline=(61,54,54), width=3)
-    draw.pieslice((cx-head_r-3, cy-int(height*.30)-head_r-5, cx+head_r+3, cy-int(height*.30)+head_r//2),
-                  180, 355, fill=(65,48,39))
-    draw.rounded_rectangle((cx-int(width*.055), cy-int(height*.24), cx+int(width*.055), cy-int(height*.09)),
-                           radius=14, fill=shirt, outline=(55,55,65), width=3)
-    draw.rounded_rectangle((cx+int(width*.045), cy-int(height*.22), cx+int(width*.095), cy-int(height*.09)),
-                           radius=10, fill=(183,119,58), outline=(70,57,48), width=3)
-    line_w = max(8, int(width*.018))
-    draw.line((cx-int(width*.035), cy-int(height*.20), cx-int(width*.095), cy-int(height*.13)), fill=skin, width=line_w)
-    draw.line((cx+int(width*.04), cy-int(height*.20), cx+int(width*.09), cy-int(height*.27)), fill=skin, width=line_w)
-    draw.line((cx-int(width*.02), cy-int(height*.09), cx-int(width*.075), cy-int(height*.015)), fill=(48,55,78), width=line_w)
-    draw.line((cx+int(width*.02), cy-int(height*.09), cx+int(width*.085), cy-int(height*.02)), fill=(48,55,78), width=line_w)
-    draw.rectangle((0, int(height*.91), width, height), fill=(24,35,52))
-    return image
 
 
 YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -316,12 +254,15 @@ def export_video(scenes, artwork, ratio, language):
         return output_path.read_bytes()
 
 def make_project_json(story, characters, artwork):
+    safe_characters = []
+    for character in characters:
+        item = {key: value for key, value in character.items() if key != "model_bytes"}
+        if character.get("model_bytes"):
+            item["model_base64"] = base64.b64encode(character["model_bytes"]).decode("ascii")
+        safe_characters.append(item)
     return json.dumps({
-        "format_version": 2,
-        "story": story,
-        "characters": characters,
-        "artwork": {str(index): base64.b64encode(data).decode("ascii")
-                    for index, data in artwork.items()},
+        "format_version": 3, "story": story, "characters": safe_characters,
+        "artwork": {str(index): base64.b64encode(data).decode("ascii") for index, data in artwork.items()},
     }, ensure_ascii=False, indent=2).encode("utf-8")
 
 def load_project_json(file_bytes):
@@ -331,11 +272,28 @@ def load_project_json(file_bytes):
     scenes = project["story"].get("scenes")
     if not isinstance(scenes, list) or not scenes or len(scenes) > 20:
         raise ValueError("Project must contain between 1 and 20 scenes.")
-    artwork = {
-        int(index): base64.b64decode(value)
-        for index, value in project.get("artwork", {}).items()
-    }
-    return project["story"], project.get("characters", []), artwork
+    artwork = {int(index): base64.b64decode(value) for index, value in project.get("artwork", {}).items()}
+    characters = project.get("characters", [])
+    for character in characters:
+        encoded = character.pop("model_base64", None)
+        character["model_bytes"] = base64.b64decode(encoded) if encoded else None
+    return project["story"], characters, artwork
+
+def make_production_package(story, characters, artwork, ratio, language):
+    package = BytesIO()
+    with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("project.json", make_project_json(story, characters, artwork))
+        for source, target in [
+            ("blender_pipeline/render_project.py", "render_project.py"),
+            ("blender_pipeline/render_scene.py", "render_scene.py"),
+            ("blender_pipeline/README.md", "README.md"),
+        ]:
+            archive.writestr(target, Path(source).read_text(encoding="utf-8"))
+        for character in characters:
+            if character.get("model_bytes") and character.get("asset_file"):
+                archive.writestr("assets/" + character["asset_file"], character["model_bytes"])
+        archive.writestr("render-settings.txt", "Suggested language: " + language + "\nSuggested ratio: " + ratio + "\n")
+    return package.getvalue()
 
 if "story" not in st.session_state:
     st.session_state.story = None
@@ -348,16 +306,19 @@ with st.sidebar:
     st.header("Project settings")
     api_key = st.text_input("Gemini API key", value=get_secret_key(), type="password")
     st.caption("Use Streamlit Secrets for deployment. Never commit your key to GitHub.")
-    genre = st.selectbox("Genre", ["Adventure", "Fantasy", "Comedy", "Mystery", "Educational",
-                                   "Inspirational", "Sci-fi", "Bedtime"])
-    visual_style = st.selectbox("Visual style", ["3D animation", "Anime", "Cartoon",
-                                                 "Storybook illustration", "Realistic cinematic"])
+    genre = st.selectbox("Content type", ["Tamil nursery rhyme / kids song", "Comedy", "Moral story",
+                                   "Bedtime story", "Adventure", "Educational", "Fantasy",
+                                   "Animal story", "Family story", "Mystery", "Sci-fi",
+                                   "Action / superhero", "Romance (family-friendly)"])
+    visual_style = st.selectbox("Character and visual style", ["High-quality realistic 3D humans",
+        "Stylized 3D animated humans", "Realistic 3D animals", "Stylized 3D animated animals",
+        "3D fantasy characters", "Photoreal live-action look"])
     scene_count = st.slider("Number of scenes", 3, 8, 5)
     narration_language = st.selectbox("Narration language", ["English", "Tamil", "Hindi"])
     video_ratio = st.selectbox("Video format", ["9:16 Vertical Shorts", "16:9 YouTube widescreen"])
 
-story_tab, character_tab, storyboard_tab, export_tab, project_tab = st.tabs(
-    ["Story Writer", "Characters", "Storyboard", "Voice & Export", "Save / Load"]
+story_tab, character_tab, storyboard_tab, production_tab, export_tab, project_tab = st.tabs(
+    ["Story Writer", "Characters", "Storyboard", "3D Production", "Voice & Export", "Save / Load"]
 )
 
 with story_tab:
