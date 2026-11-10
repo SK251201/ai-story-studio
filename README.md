@@ -74,3 +74,8 @@ Then deploy or reboot the app. Never share your API key in chat.
 
 ## Optional YouTube upload
 The app supports manual uploads only and uploads as Unlisted. It does not publish automatically. OAuth setup is required in Google Cloud Console; keep client secrets in Streamlit Secrets only.
+
+
+## Version 4.8 — Built-in character library
+
+The app now seeds a reusable original character cast locally (children, family, schoolteacher, comedy friends, animals, adventure and fantasy characters). When a story idea is submitted, a local keyword/category matcher selects up to four relevant cast members and passes only those profiles to the story writer. The story prompt requires exact names and consistent appearance across scenes. Character selection and character profiles do not call the free community image service. The community image service is used only when the user explicitly generates scene artwork in Storyboard. The built-in library is added to existing browser sessions without deleting existing user-created characters.
