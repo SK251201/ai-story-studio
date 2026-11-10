@@ -190,8 +190,10 @@ Return JSON only, in this exact structure:
 {"characters":[
  {"name":"short original name","type":"Human or Animal or Fantasy or Other",
   "description":"Detailed visible appearance: approximate age range if clearly adult/child, face shape, skin/fur colour, hair, eyes, clothing, body shape, accessories, distinctive visual details and personality only if visually suggested",
-  "visual_prompt":"A full-body cinematic character reference portrait prompt, neutral simple background, same visible outfit and features"}
+  "visual_prompt":"A full-body cinematic character reference portrait prompt, neutral simple background, same visible outfit and features",
+  "bounding_box":[ymin,xmin,ymax,xmax]}
 ]}
+Bounding box coordinates must be integers from 0 to 1000, relative to the full image. Include the whole visible character with a little surrounding space. If an accurate box cannot be determined, use [0,0,0,0].
 Rules:
 - Identify each clearly distinct character, up to 6. Do not invent hidden people.
 - Do not identify real people or guess names, identity, ethnicity, exact age, or private traits.
@@ -199,7 +201,7 @@ Rules:
 - Preserve visible clothing, colours, hairstyle and accessories.
 - If there are no discernible characters, return {"characters":[]}.
 """
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     payload = {
         "contents": [{"parts": [
             {"text": prompt},
@@ -232,6 +234,31 @@ Rules:
         kind = str(item.get("type", "Other")).title()
         if kind not in ("Human", "Animal", "Fantasy", "Other"):
             kind = "Other"
+        crop_base64 = ""
+        box = item.get("bounding_box", [])
+        if isinstance(box, list) and len(box) == 4:
+            try:
+                ymin, xmin, ymax, xmax = [max(0, min(1000, int(value))) for value in box]
+                if ymax > ymin and xmax > xmin:
+                    with Image.open(BytesIO(image_bytes)) as source_image:
+                        source_image = source_image.convert("RGB")
+                        image_width, image_height = source_image.size
+                        # Gemini coordinates are normalized to 0..1000; add a small margin.
+                        left = int(xmin / 1000 * image_width)
+                        top = int(ymin / 1000 * image_height)
+                        right = int(xmax / 1000 * image_width)
+                        bottom = int(ymax / 1000 * image_height)
+                        margin_x = max(8, int((right - left) * 0.08))
+                        margin_y = max(8, int((bottom - top) * 0.08))
+                        crop = source_image.crop((
+                            max(0, left - margin_x), max(0, top - margin_y),
+                            min(image_width, right + margin_x), min(image_height, bottom + margin_y)
+                        ))
+                        buffer = BytesIO()
+                        crop.save(buffer, format="JPEG", quality=90)
+                        crop_base64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+            except Exception:
+                crop_base64 = ""
         cleaned.append({
             "name": name,
             "type": kind,
@@ -240,6 +267,7 @@ Rules:
             "asset_file": "",
             "model_bytes": None,
             "portrait_base64": "",
+            "source_reference_base64": crop_base64,
         })
     return cleaned
 
@@ -680,7 +708,7 @@ with character_tab:
         "Upload a picture containing one or more characters",
         type=["png", "jpg", "jpeg", "webp"], key="character_reference_upload"
     )
-    st.caption("The picture is analysed with your Gemini API key. Character descriptions are extracted and added to your library. The uploaded picture is sent to Google's Gemini API for analysis; only use images you have permission to use.")
+    st.caption("The picture is analysed with Gemini 3.8 Flash using your API key. Visible characters are identified, their descriptions are extracted, and approximate image crops are saved into your library. The uploaded picture is sent to Google's Gemini API for analysis; only use images you have permission to use.")
     if st.button("Automatically extract characters", type="primary",
                  disabled=(reference_image is None or not bool(api_key.strip()))):
         try:
@@ -824,9 +852,19 @@ with character_tab:
     st.markdown(f"#### Your reusable cast ({len(st.session_state.characters)} characters)")
     for index, character in enumerate(st.session_state.characters):
         with st.expander(f"{character.get('name', 'Character')} · {character.get('type', 'Character')}", expanded=(index == 0)):
-            if character.get("portrait_base64"):
+            if character.get("source_reference_base64"):
+                try:
+                    st.image(base64.b64decode(character["source_reference_base64"]), caption="Character crop extracted from your uploaded image", width=260)
+                except Exception:
+                    pass
+            elif character.get("portrait_base64"):
                 try:
                     st.image(base64.b64decode(character["portrait_base64"]), caption="Saved character reference portrait", width=260)
+                except Exception:
+                    pass
+            if character.get("portrait_base64") and character.get("source_reference_base64"):
+                try:
+                    st.image(base64.b64decode(character["portrait_base64"]), caption="Generated reusable character portrait", width=260)
                 except Exception:
                     pass
             st.write(character.get("description", ""))
@@ -1102,4 +1140,4 @@ with history_tab:
             st.error(f"Could not restore history: {error}")
 
 st.divider()
-st.caption("Version 4.5 · Character Studio, uploaded-image character extraction, portable character libraries, photoreal and 3D portrait styles, reusable characters, 3D production tools and YouTube-ready exports.")
+st.caption("Version 4.6 · Character Studio, uploaded-image character crops, Gemini 3.8 vision extraction, portable libraries, photoreal and 3D portraits, reusable characters, 3D production tools and YouTube-ready exports.")
