@@ -14,9 +14,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile application
-        run: python -m py_compile app.py
+      - name: Compile all Python entry points
+        run: |
+          python -m py_compile app.py
+          python -m py_compile blender_pipeline/render_project.py
+          python -m py_compile blender_pipeline/render_scene.py
       - name: Check required files
         run: |
           test -f requirements.txt
           test -f README.md
+          test -f blender_pipeline/README.md
