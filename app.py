@@ -103,101 +103,67 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
     raise RuntimeError("Gemini could not generate a story. Please try again shortly.")
 
 
-def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
-    """Generate an image using stable Gemini image models with quota-aware fallback."""
-    visual_ratio = "9:16" if ratio.startswith("9:16") else "16:9"
-    instruction = (
-        f"Create one high-quality {style} illustration for a YouTube story scene. "
-        f"Composition must be {visual_ratio}. Scene: {prompt}. "
-        "Use cinematic composition, expressive but family-friendly characters, "
-        "clear visual storytelling, and no captions, logos, watermarks, borders, or text. "
-        "If a reference image is supplied, preserve the main character's identity, face, "
-        "hair, clothing, age, colors, and proportions; change only pose, action, camera "
-        "angle, and background to fit this scene."
-    )
-    parts = [{"text": instruction}]
-    if reference_bytes:
-        ref_image = Image.open(BytesIO(reference_bytes)).convert("RGB")
-        ref_buffer = BytesIO()
-        ref_image.save(ref_buffer, format="PNG")
-        parts.append({
-            "inline_data": {
-                "mime_type": "image/png",
-                "data": base64.b64encode(ref_buffer.getvalue()).decode("ascii"),
-            }
-        })
-
-    # Stable image model first; lower-cost Lite model is the automatic fallback.
-    models = ["gemini-3.1-flash-image", "gemini-3.1-flash-lite-image"]
-    failures = []
-    for model in models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        for attempt in range(2):
-            response = requests.post(
-                url,
-                headers={"x-goog-api-key": key},
-                json={
-                    "contents": [{"parts": parts}],
-                    "generationConfig": {
-                        "responseModalities": ["TEXT", "IMAGE"],
-                        "imageConfig": {"aspectRatio": visual_ratio, "imageSize": "1K"},
-                    },
-                },
-                timeout=(20, 240),
-            )
-            if response.ok:
-                candidates = response.json().get("candidates", [])
-                if not candidates:
-                    failures.append(f"{model}: no image candidate returned")
-                    break
-                for part in candidates[0].get("content", {}).get("parts", []):
-                    image_data = part.get("inline_data") or part.get("inlineData")
-                    if image_data and image_data.get("data"):
-                        image_bytes = base64.b64decode(image_data["data"])
-                        Image.open(BytesIO(image_bytes)).verify()
-                        return image_bytes
-                failures.append(f"{model}: response contained no image data")
-                break
-
-            try:
-                detail = response.json().get("error", {}).get("message", "Request failed.")
-            except Exception:
-                detail = "Request failed."
-
-            if response.status_code == 429:
-                lowered = detail.lower()
-                quota_exhausted = any(term in lowered for term in (
-                    "perday", "per day", "quota exceeded", "daily limit",
-                    "requests per day", "images per day"
-                ))
-                if quota_exhausted:
-                    failures.append(f"{model}: daily/model quota exhausted")
-                    # Try the fallback model; quotas can differ by model.
-                    break
-                if attempt == 0:
-                    retry_after = response.headers.get("Retry-After")
-                    try:
-                        wait_seconds = min(45, max(5, int(retry_after))) if retry_after else 10
-                    except ValueError:
-                        wait_seconds = 10
-                    time.sleep(wait_seconds)
-                    continue
-                failures.append(f"{model}: temporary rate limit (429)")
-                break
-
-            if response.status_code in (500, 502, 503, 504) and attempt == 0:
-                time.sleep(5)
-                continue
-
-            failures.append(f"{model}: HTTP {response.status_code} - {detail[:180]}")
-            break
-
-    raise RuntimeError(
-        "All configured Gemini image models are currently unavailable. "
-        + " | ".join(failures)
-        + " Check the project's image-model quotas and billing in Google AI Studio. "
-          "Existing scene images are preserved; you can also upload artwork manually."
-    )
+def generate_free_scene_image(prompt, style, ratio, scene_index=0):
+    """Render a simple original vector-style scene locally with Pillow; no image API."""
+    vertical = ratio.startswith("9:16")
+    width, height = (576, 1024) if vertical else (1024, 576)
+    image = Image.new("RGB", (width, height))
+    draw = ImageDraw.Draw(image)
+    seed = sum(ord(ch) for ch in (prompt or "")) + scene_index * 97
+    palettes = [
+        ((112, 184, 230), (231, 241, 250), (89, 157, 112)),
+        ((246, 180, 112), (255, 224, 173), (79, 139, 104)),
+        ((92, 120, 174), (190, 207, 230), (65, 100, 117)),
+        ((126, 174, 157), (218, 235, 216), (89, 135, 100)),
+    ]
+    sky, horizon, ground = palettes[seed % len(palettes)]
+    for y in range(height):
+        t = y / max(1, height - 1)
+        color = tuple(int(sky[i] * (1 - t) + horizon[i] * t) for i in range(3))
+        draw.line((0, y, width, y), fill=color)
+    sun_x = int(width * (0.78 if seed % 2 else 0.18))
+    draw.ellipse((sun_x-width*.055, height*.09, sun_x+width*.055, height*.20), fill=(255, 224, 128))
+    for cx, cy in ((.22, .19), (.67, .25)):
+        x, y = int(width*cx), int(height*cy)
+        radius = max(18, int(width*.035))
+        for ox, oy in ((0, 0), (radius, -radius//3), (2*radius, 0)):
+            draw.ellipse((x+ox-radius, y+oy-radius, x+ox+radius, y+oy+radius), fill=(248, 250, 252))
+    draw.polygon([(0, int(height*.62)), (int(width*.22), int(height*.40)),
+                  (int(width*.43), int(height*.63)), (int(width*.68), int(height*.42)),
+                  (width, int(height*.62)), (width, height), (0, height)], fill=ground)
+    draw.rectangle((0, int(height*.76), width, height), fill=(87, 145, 91))
+    text = (prompt or "").lower()
+    if any(word in text for word in ("school", "class", "teacher", "student")):
+        bx, by = int(width*.67), int(height*.47)
+        bw, bh = int(width*.25), int(height*.22)
+        draw.rectangle((bx, by, bx+bw, by+bh), fill=(244, 207, 145), outline=(88, 73, 66), width=4)
+        draw.polygon([(bx-12, by), (bx+bw//2, by-int(height*.11)), (bx+bw+12, by)],
+                     fill=(171, 76, 67), outline=(88, 73, 66))
+        draw.rectangle((bx+bw*.42, by+bh*.48, bx+bw*.62, by+bh), fill=(101, 75, 63))
+    elif any(word in text for word in ("forest", "tree", "jungle", "park")):
+        for tx in (.12, .84):
+            x, y = int(width*tx), int(height*.56)
+            draw.rectangle((x-width*.012, y, x+width*.012, int(height*.78)), fill=(103, 74, 48))
+            draw.ellipse((x-width*.075, y-height*.13, x+width*.075, y+height*.05), fill=(44, 112, 76))
+    cx, cy = int(width*(.38 + (scene_index % 3)*.035)), int(height*.68)
+    head_r = int(width*.047)
+    skin = (235, 181, 143)
+    shirt = [(59,107,184), (196,89,83), (89,151,117), (135,102,176)][seed % 4]
+    draw.ellipse((cx-head_r, cy-int(height*.30)-head_r, cx+head_r, cy-int(height*.30)+head_r),
+                 fill=skin, outline=(61,54,54), width=3)
+    draw.pieslice((cx-head_r-3, cy-int(height*.30)-head_r-5, cx+head_r+3, cy-int(height*.30)+head_r//2),
+                  180, 355, fill=(65,48,39))
+    draw.rounded_rectangle((cx-int(width*.055), cy-int(height*.24), cx+int(width*.055), cy-int(height*.09)),
+                           radius=14, fill=shirt, outline=(55,55,65), width=3)
+    draw.rounded_rectangle((cx+int(width*.045), cy-int(height*.22), cx+int(width*.095), cy-int(height*.09)),
+                           radius=10, fill=(183,119,58), outline=(70,57,48), width=3)
+    line_w = max(8, int(width*.018))
+    draw.line((cx-int(width*.035), cy-int(height*.20), cx-int(width*.095), cy-int(height*.13)), fill=skin, width=line_w)
+    draw.line((cx+int(width*.04), cy-int(height*.20), cx+int(width*.09), cy-int(height*.27)), fill=skin, width=line_w)
+    draw.line((cx-int(width*.02), cy-int(height*.09), cx-int(width*.075), cy-int(height*.015)), fill=(48,55,78), width=line_w)
+    draw.line((cx+int(width*.02), cy-int(height*.09), cx+int(width*.085), cy-int(height*.02)), fill=(48,55,78), width=line_w)
+    draw.rectangle((0, int(height*.91), width, height), fill=(24,35,52))
+    return image
 
 
 YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -450,7 +416,7 @@ with storyboard_tab:
     if not st.session_state.story:
         st.info("Generate or load a project to edit its storyboard.")
     else:
-        st.caption("Generate scene artwork automatically with Gemini. Image generation uses your Gemini API quota and may incur charges.")
+        st.caption("Free local illustration mode: creates original cartoon-style scene artwork on this app server. No image-generation API or paid image quota is used.")
         if st.button("Generate artwork for all scenes", type="primary", key="generate_all_artwork"):
             if not api_key.strip():
                 st.warning("Add your Gemini API key in the sidebar first.")
@@ -467,9 +433,10 @@ with storyboard_tab:
                         reference = st.session_state.artwork.get(0) if image_index > 0 else None
                         scene_prompt = image_scene.get("visual_prompt") or image_scene.get("heading", "Story scene")
                         with st.spinner(f"Generating artwork for scene {image_index + 1} of {total_scenes}..."):
-                            st.session_state.artwork[image_index] = generate_scene_image(
-                                api_key.strip(), scene_prompt, visual_style, video_ratio, reference
-                            )
+                            free_image = generate_free_scene_image(scene_prompt, visual_style, video_ratio, image_index)
+                            image_buffer = BytesIO()
+                            free_image.save(image_buffer, format="PNG")
+                            st.session_state.artwork[image_index] = image_buffer.getvalue()
                         progress.progress((image_index + 1) / total_scenes,
                                           text=f"Generated scene {image_index + 1} of {total_scenes}")
                         if image_index < total_scenes - 1:
@@ -498,13 +465,13 @@ with storyboard_tab:
                         reference = st.session_state.artwork.get(0) if index > 0 else None
                         try:
                             with st.spinner(f"Generating scene {index + 1} artwork..."):
-                                st.session_state.artwork[index] = generate_scene_image(
-                                    api_key.strip(),
+                                free_image = generate_free_scene_image(
                                     scene.get("visual_prompt") or scene.get("heading", "Story scene"),
-                                    visual_style,
-                                    video_ratio,
-                                    reference,
+                                    visual_style, video_ratio, index
                                 )
+                                image_buffer = BytesIO()
+                                free_image.save(image_buffer, format="PNG")
+                                st.session_state.artwork[index] = image_buffer.getvalue()
                             st.success("Scene artwork generated.")
                         except Exception as error:
                             st.error(f"Image generation failed: {error}")
@@ -630,4 +597,4 @@ with project_tab:
             st.error(f"Could not load project: {error}")
 
 st.divider()
-st.caption("Version 3 · AI scene artwork + narrated slideshow editor, not a full motion-video generator. Use original stories and properly licensed assets; publishing does not guarantee YouTube monetisation.")
+st.caption("Version 3.3 · Free local scene illustrations + narrated slideshow editor, not a full motion-video generator. Use original stories and properly licensed assets; publishing does not guarantee YouTube monetisation.")
