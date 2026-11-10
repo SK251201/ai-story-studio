@@ -46,9 +46,13 @@ add_area("Rim Light", (1, 4, 5), 1800, 3, (1.0, 0.9, 0.72))
 camera_data = bpy.data.cameras.new("Cinematic Camera")
 camera = bpy.data.objects.new("Cinematic Camera", camera_data)
 scene.collection.objects.link(camera)
-camera.location = (0, -8.5, 3.0)
+if scene.render.resolution_y > scene.render.resolution_x:
+    camera.location = (0, -5.8, 2.8)
+    camera_data.lens = 42
+else:
+    camera.location = (0, -8.5, 3.0)
+    camera_data.lens = 52
 camera.rotation_euler = (Vector((0, 0, 1.15)) - camera.location).to_track_quat("-Z", "Y").to_euler()
-camera_data.lens = 52
 scene.camera = camera
 
 assets = shot.get("assets", {})
