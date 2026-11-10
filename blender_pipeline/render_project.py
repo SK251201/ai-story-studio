@@ -54,7 +54,7 @@ def main():
             probe = subprocess.run([ffmpeg, "-i", str(audio), "-f", "null", "-"],
                                    capture_output=True, text=True)
             import re
-            match = re.search(r"Duration: (\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", probe.stderr)
+            match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
             audio_seconds = (int(match.group(1))*3600 + int(match.group(2))*60 + float(match.group(3))) if match else args.seconds_per_scene
             frames = max(frames, int((audio_seconds + 0.8) * args.fps))
             shot = {"assets":assets, "character_names":names, "heading":item.get("heading",""),
