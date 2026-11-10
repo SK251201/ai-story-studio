@@ -597,22 +597,6 @@ def make_production_package(story, characters, artwork, ratio, language):
         archive.writestr("render-settings.txt", "Suggested language: " + language + "\nSuggested ratio: " + ratio + "\n")
     return package.getvalue()
 
-if "story" not in st.session_state:
-    st.session_state.story = None
-if "characters" not in st.session_state:
-    st.session_state.characters = [dict(item, asset_file="", model_bytes=None, portrait_base64="", source_reference_base64="") for item in BUILTIN_CHARACTER_LIBRARY]
-else:
-    existing_character_names = {item.get("name", "").casefold() for item in st.session_state.characters}
-    for default_character in BUILTIN_CHARACTER_LIBRARY:
-        if default_character["name"].casefold() not in existing_character_names:
-            st.session_state.characters.append(dict(default_character, asset_file="", model_bytes=None, portrait_base64="", source_reference_base64=""))
-if "artwork" not in st.session_state:
-    st.session_state.artwork = {}
-if "creation_history" not in st.session_state:
-    st.session_state.creation_history = []
-if "current_history_id" not in st.session_state:
-    st.session_state.current_history_id = None
-
 BUILTIN_CHARACTER_LIBRARY = [
  {"name":"Aru","type":"Human","category":"kids","tags":["child","boy","school","friendship","rhyme","kids"],"description":"A cheerful 7-year-old Indian schoolboy with warm medium-brown skin, short neatly side-parted black hair, expressive dark-brown eyes, a sky-blue school shirt, navy shorts, white socks and black school shoes. Curious, brave and energetic.","visual_prompt":"Photoreal live-action child, sky-blue school shirt and navy shorts."},
  {"name":"Maya","type":"Human","category":"kids","tags":["child","girl","school","friendship","rhyme","kids"],"description":"A cheerful 7-year-old Indian schoolgirl with warm medium-brown skin, large brown eyes, long black hair in two braids with yellow ribbons, teal pinafore over a white shirt and white shoes. Kind and confident.","visual_prompt":"Photoreal live-action child, teal pinafore, white shirt and twin braids."},
@@ -659,6 +643,21 @@ def select_characters_for_story(idea, genre, characters, limit=4):
     chosen = [row[2] for row in scores if row[0] > 0][:limit]
     return chosen or [row[2] for row in scores[:2]]
 
+if "story" not in st.session_state:
+    st.session_state.story = None
+if "characters" not in st.session_state:
+    st.session_state.characters = [dict(item, asset_file="", model_bytes=None, portrait_base64="", source_reference_base64="") for item in BUILTIN_CHARACTER_LIBRARY]
+else:
+    existing_character_names = {item.get("name", "").casefold() for item in st.session_state.characters}
+    for default_character in BUILTIN_CHARACTER_LIBRARY:
+        if default_character["name"].casefold() not in existing_character_names:
+            st.session_state.characters.append(dict(default_character, asset_file="", model_bytes=None, portrait_base64="", source_reference_base64=""))
+if "artwork" not in st.session_state:
+    st.session_state.artwork = {}
+if "creation_history" not in st.session_state:
+    st.session_state.creation_history = []
+if "current_history_id" not in st.session_state:
+    st.session_state.current_history_id = None
 
 def save_history_snapshot():
     """Keep a restorable, bounded history of stories and their generated images."""
