@@ -98,6 +98,56 @@ Do not use copyrighted characters, existing franchises, or celebrity likenesses.
         raise last_error
     raise RuntimeError("Gemini could not generate a story. Please try again shortly.")
 
+
+def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
+    """Generate one scene illustration with Gemini image generation."""
+    visual_ratio = "9:16" if ratio.startswith("9:16") else "16:9"
+    instruction = (
+        f"Create one high-quality {style} illustration for a YouTube story scene. "
+        f"Composition must be {visual_ratio}. Scene: {prompt}. "
+        "Use cinematic composition, expressive but family-friendly characters, "
+        "clear readable visual storytelling, and no captions, logos, watermarks, "
+        "borders, or written text. "
+        "If a reference image is supplied, preserve the main character's face, "
+        "hair, clothing, age, colors, and proportions exactly; only change the "
+        "pose, action, camera angle, and background to fit this scene."
+    )
+    parts = [{"text": instruction}]
+    if reference_bytes:
+        ref_image = Image.open(BytesIO(reference_bytes)).convert("RGB")
+        ref_buffer = BytesIO()
+        ref_image.save(ref_buffer, format="PNG")
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/png",
+                "data": base64.b64encode(ref_buffer.getvalue()).decode("ascii"),
+            }
+        })
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent"
+    response = requests.post(
+        url,
+        params={"key": key},
+        json={
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "responseFormat": {
+                    "image": {"aspectRatio": visual_ratio, "imageSize": "1K"}
+                },
+            },
+        },
+        timeout=(20, 240),
+    )
+    response.raise_for_status()
+    candidates = response.json().get("candidates", [])
+    if not candidates:
+        raise ValueError("Gemini returned no image. Please try again.")
+    for part in candidates[0].get("content", {}).get("parts", []):
+        image_data = part.get("inline_data") or part.get("inlineData")
+        if image_data and image_data.get("data"):
+            return base64.b64decode(image_data["data"])
+    raise ValueError("Gemini response did not contain an image. Check model access and API quota.")
+
 def render_scene_card(scene, artwork_bytes, width, height, index, total):
     if artwork_bytes:
         image = Image.open(BytesIO(artwork_bytes)).convert("RGB")
@@ -267,9 +317,31 @@ with storyboard_tab:
     if not st.session_state.story:
         st.info("Generate or load a project to edit its storyboard.")
     else:
+        st.caption("Generate scene artwork automatically with Gemini. Image generation uses your Gemini API quota and may incur charges.")
+        if st.button("Generate artwork for all scenes", type="primary", key="generate_all_artwork"):
+            if not api_key.strip():
+                st.warning("Add your Gemini API key in the sidebar first.")
+            else:
+                progress = st.progress(0, text="Preparing scene artwork...")
+                try:
+                    for image_index, image_scene in enumerate(st.session_state.story["scenes"]):
+                        reference = st.session_state.artwork.get(0) if image_index > 0 else None
+                        scene_prompt = image_scene.get("visual_prompt") or image_scene.get("heading", "Story scene")
+                        with st.spinner(f"Generating artwork for scene {image_index + 1} of {len(st.session_state.story['scenes'])}..."):
+                            st.session_state.artwork[image_index] = generate_scene_image(
+                                api_key.strip(), scene_prompt, visual_style, video_ratio, reference
+                            )
+                        if image_index == 0:
+                            reference = st.session_state.artwork[0]
+                        progress.progress(
+                            (image_index + 1) / len(st.session_state.story["scenes"]),
+                            text=f"Generated scene {image_index + 1} of {len(st.session_state.story['scenes'])}"
+                        )
+                    st.success("Artwork generated for all scenes. Review each image below.")
+                except Exception as error:
+                    st.error(f"Artwork generation stopped: {error}")
         for index, scene in enumerate(st.session_state.story["scenes"]):
-            with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}",
-                             expanded=(index == 0)):
+            with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}", expanded=(index == 0)):
                 scene["heading"] = st.text_input(
                     "Scene heading", scene.get("heading", ""), key=f"heading_{index}"
                 )
@@ -282,14 +354,31 @@ with storyboard_tab:
                 scene["visual_prompt"] = st.text_area(
                     "Artwork prompt", scene.get("visual_prompt", ""), key=f"prompt_{index}"
                 )
+                if st.button("Generate / regenerate this scene image", key=f"generate_image_{index}"):
+                    if not api_key.strip():
+                        st.warning("Add your Gemini API key in the sidebar first.")
+                    else:
+                        reference = st.session_state.artwork.get(0) if index > 0 else None
+                        try:
+                            with st.spinner(f"Generating scene {index + 1} artwork..."):
+                                st.session_state.artwork[index] = generate_scene_image(
+                                    api_key.strip(),
+                                    scene.get("visual_prompt") or scene.get("heading", "Story scene"),
+                                    visual_style,
+                                    video_ratio,
+                                    reference,
+                                )
+                            st.success("Scene artwork generated.")
+                        except Exception as error:
+                            st.error(f"Image generation failed: {error}")
                 uploaded = st.file_uploader(
-                    "Upload scene artwork", type=["png", "jpg", "jpeg"], key=f"art_{index}"
+                    "Or upload your own scene artwork", type=["png", "jpg", "jpeg"], key=f"art_{index}"
                 )
                 if uploaded:
                     st.session_state.artwork[index] = uploaded.getvalue()
                 if index in st.session_state.artwork:
                     st.image(st.session_state.artwork[index], use_container_width=True)
-        st.caption("Without uploaded artwork, the export uses generated storyboard title cards.")
+        st.caption("Generated or uploaded scene artwork is used automatically when you build the narrated MP4.")
 
 with export_tab:
     if not st.session_state.story:
@@ -356,4 +445,4 @@ with project_tab:
             st.error(f"Could not load project: {error}")
 
 st.divider()
-st.caption("Version 2 · This is a narrated slideshow editor, not a full motion-video generator. Use original stories and properly licensed assets; publishing does not guarantee YouTube monetisation.")
+st.caption("Version 3 · AI scene artwork + narrated slideshow editor, not a full motion-video generator. Use original stories and properly licensed assets; publishing does not guarantee YouTube monetisation.")
