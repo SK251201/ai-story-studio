@@ -28,6 +28,67 @@ def get_secret_key():
     except Exception:
         return os.getenv("GEMINI_API_KEY", "")
 
+
+def get_pollinations_key():
+    try:
+        return st.secrets.get("POLLINATIONS_API_KEY", "") or os.getenv("POLLINATIONS_API_KEY", "")
+    except Exception:
+        return os.getenv("POLLINATIONS_API_KEY", "")
+
+def generate_scene_image(api_key, scene, characters, visual_style, ratio):
+    """Generate one cinematic storyboard image. The provider may charge Pollen per image."""
+    from urllib.parse import quote
+
+    cast = scene.get("characters", [])
+    character_notes = []
+    for character in characters:
+        if character.get("name") in cast:
+            character_notes.append(
+                f"{character['name']}: {character.get('description', '')}"
+            )
+    cast_text = "; ".join(character_notes) or "Use the character details stated in the shot direction."
+    prompt = (
+        "Create one polished, high-detail cinematic 3D animated film frame for an original YouTube story. "
+        "Realistic appealing character anatomy, expressive natural faces, detailed clothing and materials, "
+        "beautiful professional 3D environment, physically based textures, soft cinematic global illumination, "
+        "professional film lighting, rich but natural colors, clear composition, crisp focus, premium family-film quality. "
+        "Do not make a flat vector drawing, stick figure, simple cartoon, collage, storyboard sheet, text, logo or watermark. "
+        f"Visual style: {visual_style}. Character continuity bible: {cast_text}. "
+        f"Scene: {scene.get('heading', '')}. Shot direction: {scene.get('visual_prompt', '')}. "
+        "Show one coherent moment with all named characters looking consistent with their descriptions. "
+        "Keep faces and full bodies visible where framing allows. No captions or written words."
+    )
+    url = "https://gen.pollinations.ai/image/" + quote(prompt, safe="")
+    response = requests.get(
+        url,
+        params={
+            "model": "black-forest-labs/flux.1-schnell",
+            "width": 1024,
+            "height": 1024,
+            "safe": "privacy",
+        },
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=(20, 180),
+    )
+    if response.status_code == 402:
+        raise RuntimeError("Your Pollinations Pollen balance is insufficient. No further image was generated.")
+    if response.status_code == 429:
+        raise RuntimeError("Image service rate limit reached. Wait before trying again.")
+    if response.status_code in (401, 403):
+        raise RuntimeError("Pollinations rejected the API key. Check that it is a valid secret key with image permission.")
+    response.raise_for_status()
+    content_type = response.headers.get("Content-Type", "")
+    if not content_type.startswith("image/"):
+        raise RuntimeError("The image provider returned a non-image response.")
+    image_bytes = response.content
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.verify()
+    except Exception as error:
+        raise RuntimeError("The image provider returned an invalid image file.") from error
+    return image_bytes
+
+
 def generate_story(key, idea, genre, style, count, characters):
     prompt = f"""
 Create an original {genre} story based on this idea: {idea}
@@ -343,6 +404,11 @@ with st.sidebar:
     st.header("Project settings")
     api_key = st.text_input("Gemini API key", value=get_secret_key(), type="password")
     st.caption("Use Streamlit Secrets for deployment. Never commit your key to GitHub.")
+    pollinations_key = st.text_input(
+        "Optional image-generation key", value=get_pollinations_key(), type="password",
+        help="Pollinations secret key. Image generation uses your Pollinations Pollen balance."
+    )
+    st.caption("Image generation is optional. It is not unlimited-free: use only free/earned Pollen or set a strict zero/low budget on your provider key. No images are generated automatically.")
     genre = st.selectbox("Content type", ["Tamil nursery rhyme / kids song", "Comedy", "Moral story",
                                    "Bedtime story", "Adventure", "Educational", "Fantasy",
                                    "Animal story", "Family story", "Mystery", "Sci-fi",
@@ -427,7 +493,10 @@ with storyboard_tab:
     if not st.session_state.story:
         st.info("Generate or load a project to edit its storyboard.")
     else:
-        st.info("Storyboard images are optional references. For actual 3D animation, attach rigged GLB characters in Characters and use 3D Production.")
+        st.info("Generate realistic 3D storyboard images scene by scene. Generated images are saved into your project and included in narrated MP4 exports.")
+        if not pollinations_key.strip():
+            st.warning("To enable AI image generation, add a Pollinations secret key in the sidebar. Image generation uses that account's Pollen balance; it is not guaranteed to be free.")
+            st.markdown("Create/manage a key at https://enter.pollinations.ai/ and set a strict budget before using it.")
         character_names = [item["name"] for item in st.session_state.characters]
         for index, scene in enumerate(st.session_state.story["scenes"]):
             with st.expander(f"Scene {index + 1} — {scene.get('heading', 'Scene')}", expanded=(index == 0)):
@@ -440,12 +509,30 @@ with storyboard_tab:
                     default=[name for name in scene.get("characters", []) if name in character_names],
                     key=f"scene_characters_{index}"
                 )
-                uploaded = st.file_uploader("Optional storyboard reference image", type=["png", "jpg", "jpeg"], key=f"art_{index}")
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    if st.button("Generate realistic image", key=f"generate_image_{index}",
+                                 disabled=not bool(pollinations_key.strip())):
+                        try:
+                            with st.spinner(f"Generating image for scene {index + 1}..."):
+                                st.session_state.artwork[index] = generate_scene_image(
+                                    pollinations_key.strip(), scene, st.session_state.characters,
+                                    visual_style, video_ratio
+                                )
+                            st.success("Scene image generated and saved.")
+                        except Exception as error:
+                            st.error(f"Image generation failed: {error}")
+                with col2:
+                    if st.button("Remove generated image", key=f"remove_image_{index}",
+                                 disabled=index not in st.session_state.artwork):
+                        st.session_state.artwork.pop(index, None)
+                        st.rerun()
+                uploaded = st.file_uploader("Or upload your own image (free)", type=["png", "jpg", "jpeg"], key=f"art_{index}")
                 if uploaded:
                     st.session_state.artwork[index] = uploaded.getvalue()
                 if index in st.session_state.artwork:
                     st.image(st.session_state.artwork[index], use_container_width=True)
-        st.caption("3D rendering uses the uploaded GLB models, not the storyboard reference images.")
+        st.caption("Images are stored in the project JSON and used as scene backgrounds in narrated MP4 exports. Character descriptions guide consistency, but an image model may still vary faces/outfits between scenes.")
 
 with production_tab:
     st.subheader("3D animated production package")
