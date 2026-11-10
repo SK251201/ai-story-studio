@@ -1,5 +1,5 @@
-streamlit
-requests
-gTTS
-Pillow
-imageio-ffmpeg
+streamlit>=1.40,<2
+requests>=2.31
+gTTS>=2.5
+Pillow>=10.0
+imageio-ffmpeg>=0.5
