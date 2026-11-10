@@ -4,6 +4,8 @@ import os
 import subprocess
 import tempfile
 import time
+import uuid
+from datetime import datetime, timezone
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -30,7 +32,7 @@ def get_secret_key():
 
 
 def generate_scene_image(scene, characters, visual_style, ratio, progress_callback=None):
-    """Free community-hosted image generation through anonymous AI Horde workers."""
+    """Free AI Horde generation with lower-work settings and rate-limit-safe polling."""
     cast = scene.get("characters", [])
     character_notes = [
         f"{item.get('name')}: {item.get('description', '')}"
@@ -38,67 +40,100 @@ def generate_scene_image(scene, characters, visual_style, ratio, progress_callba
     ]
     cast_text = "; ".join(character_notes) or "Follow the original character descriptions in the scene."
     prompt = (
-        "Premium cinematic 3D animated family film frame, polished realistic 3D rendering, "
+        "Premium cinematic 3D animated family film frame, realistic polished 3D rendering, "
         "believable human or animal anatomy, expressive natural faces, detailed hair and clothing, "
-        "high quality physically based materials, realistic skin and fur textures, detailed environment, "
-        "professional cinematography, soft global illumination, natural shadows, rich but balanced colors, "
-        "beautiful composition, crisp focus, high detail. "
+        "realistic skin and fur textures, detailed environment, professional cinematography, "
+        "soft global illumination, natural shadows, natural colors, beautiful composition, crisp focus. "
         f"Visual direction: {visual_style}. Character continuity: {cast_text}. "
         f"Scene: {scene.get('heading', '')}. Action and camera: {scene.get('visual_prompt', '')}. "
         "One single coherent cinematic frame, original characters only, consistent face, hairstyle, "
-        "clothing and colors, clear readable action, no text, no logo, no watermark, no collage."
+        "clothing and colors, clear readable action, no text, logo, watermark or collage."
     )
     negative = (
-        "flat vector, stick figure, crude cartoon, low quality, blurry, pixelated, bad anatomy, "
-        "extra fingers, extra limbs, duplicated people, distorted face, text, subtitles, logo, watermark"
+        "flat vector, stick figure, crude cartoon, blurry, pixelated, bad anatomy, extra fingers, "
+        "extra limbs, duplicated people, distorted face, text, subtitles, logo, watermark"
     )
+    # Smaller images and fewer steps use far less volunteer GPU time.
     if ratio.startswith("9:16"):
-        width, height = 640, 1024
+        width, height = 512, 768
     else:
-        width, height = 1024, 576
+        width, height = 768, 432
     headers = {
         "apikey": "0000000000",
-        "Client-Agent": "AI-Story-Studio:4.2:community-free",
+        "Client-Agent": "AI-Story-Studio:4.3:free",
         "Content-Type": "application/json",
     }
     payload = {
         "prompt": prompt + " ### " + negative,
         "params": {
             "sampler_name": "k_euler_a",
-            "cfg_scale": 7.5,
-            "steps": 25,
+            "cfg_scale": 6.5,
+            "steps": 14,
             "width": width,
             "height": height,
             "n": 1,
         },
-        "models": ["AlbedoBase XL (SDXL)"],
+        # No single-model restriction: any compatible volunteer worker may accept it.
         "nsfw": False,
         "censor_nsfw": True,
         "r2": True,
         "shared": True,
+        "allow_downgrade": True,
     }
-    base = "https://stablehorde.net/api/v2"
+    base = "https://aihorde.net/api/v2"
     try:
         submitted = requests.post(
             base + "/generate/async", headers=headers, json=payload, timeout=(15, 45)
         )
         if submitted.status_code == 429:
-            raise RuntimeError("AI Horde's free anonymous request limit is busy. Wait a little and retry.")
+            retry = submitted.headers.get("Retry-After", "a short while")
+            raise RuntimeError(f"Free image service is receiving too many requests. Retry after {retry} seconds.")
         submitted.raise_for_status()
         request_id = submitted.json().get("id")
         if not request_id:
             raise RuntimeError("The free image service did not return a job ID.")
-        deadline = time.time() + 480
+
+        # /check is designed for frequent progress checks; /status is reserved for final image retrieval.
+        deadline = time.time() + 1800
+        last_queue = None
         while time.time() < deadline:
-            status_response = requests.get(
-                base + f"/generate/status/{request_id}", headers=headers, timeout=(15, 45)
-            )
-            status_response.raise_for_status()
-            status_data = status_response.json()
-            if status_data.get("faulted"):
-                raise RuntimeError("The volunteer image worker could not complete this request. Please retry.")
-            if status_data.get("done"):
-                generations = status_data.get("generations") or []
+            try:
+                check_response = requests.get(
+                    base + f"/generate/check/{request_id}", headers=headers, timeout=(10, 25)
+                )
+                if check_response.status_code == 429:
+                    retry_after = check_response.headers.get("Retry-After")
+                    delay = min(max(int(retry_after), 5), 60) if retry_after and retry_after.isdigit() else 15
+                    if progress_callback:
+                        progress_callback("rate-limited", f"retrying in {delay}s")
+                    time.sleep(delay)
+                    continue
+                check_response.raise_for_status()
+                check_data = check_response.json()
+            except requests.exceptions.Timeout:
+                time.sleep(10)
+                continue
+
+            queue = check_data.get("queue_position", "?")
+            wait = check_data.get("wait_time", 0)
+            if progress_callback and (queue, wait) != last_queue:
+                progress_callback(queue, wait)
+                last_queue = (queue, wait)
+
+            if check_data.get("faulted"):
+                raise RuntimeError("The volunteer worker could not complete this image. Please retry.")
+            if check_data.get("done"):
+                result_response = requests.get(
+                    base + f"/generate/status/{request_id}", headers=headers, timeout=(15, 45)
+                )
+                if result_response.status_code == 429:
+                    time.sleep(15)
+                    result_response = requests.get(
+                        base + f"/generate/status/{request_id}", headers=headers, timeout=(15, 45)
+                    )
+                result_response.raise_for_status()
+                result_data = result_response.json()
+                generations = result_data.get("generations") or []
                 if not generations:
                     raise RuntimeError("The image job finished without returning an image.")
                 image_value = generations[0].get("img", "")
@@ -114,12 +149,10 @@ def generate_scene_image(scene, characters, visual_style, ratio, progress_callba
                 except Exception as error:
                     raise RuntimeError("The free image service returned an invalid image.") from error
                 return image_bytes
-            if progress_callback:
-                queue = status_data.get("queue_position", "?")
-                wait = status_data.get("wait_time", 0)
-                progress_callback(queue, wait)
-            time.sleep(5)
-        raise TimeoutError("The free community queue is taking too long. Your app is still free; try again later.")
+
+            # The Horde status cache is 1 second; 8-second checks reduce 429s without slowing completion.
+            time.sleep(8)
+        raise TimeoutError("The volunteer queue is still busy after 30 minutes. Your story is safe; retry later.")
     except requests.exceptions.Timeout as error:
         raise RuntimeError("The free image service timed out. Please retry.") from error
     except requests.exceptions.ConnectionError as error:
@@ -436,6 +469,50 @@ if "characters" not in st.session_state:
     st.session_state.characters = []
 if "artwork" not in st.session_state:
     st.session_state.artwork = {}
+if "creation_history" not in st.session_state:
+    st.session_state.creation_history = []
+if "current_history_id" not in st.session_state:
+    st.session_state.current_history_id = None
+
+def save_history_snapshot():
+    """Keep a restorable, bounded history of stories and their generated images."""
+    if not st.session_state.story:
+        return
+    entry_id = st.session_state.current_history_id or str(uuid.uuid4())
+    st.session_state.current_history_id = entry_id
+    safe_images = {
+        str(index): base64.b64encode(data).decode("ascii")
+        for index, data in st.session_state.artwork.items()
+    }
+    snapshot = {
+        "id": entry_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "title": st.session_state.story.get("title", "Untitled story"),
+        "genre": st.session_state.get("active_genre", ""),
+        "style": st.session_state.get("active_style", ""),
+        "ratio": st.session_state.get("active_ratio", ""),
+        "story": st.session_state.story,
+        "characters": [
+            {key: value for key, value in item.items() if key != "model_bytes"}
+            for item in st.session_state.characters
+        ],
+        "artwork": safe_images,
+    }
+    previous = [
+        item for item in st.session_state.creation_history
+        if item.get("id") != entry_id
+    ]
+    st.session_state.creation_history = [snapshot] + previous
+    st.session_state.creation_history = st.session_state.creation_history[:20]
+
+def restore_history_entry(entry):
+    st.session_state.story = entry.get("story")
+    st.session_state.characters = entry.get("characters", [])
+    st.session_state.artwork = {
+        int(index): base64.b64decode(value)
+        for index, value in entry.get("artwork", {}).items()
+    }
+    st.session_state.current_history_id = entry.get("id")
 
 with st.sidebar:
     st.header("Project settings")
@@ -454,8 +531,8 @@ with st.sidebar:
     narration_language = st.selectbox("Narration language", ["English", "Tamil", "Hindi"])
     video_ratio = st.selectbox("Video format", ["9:16 Vertical Shorts", "16:9 YouTube widescreen"])
 
-story_tab, character_tab, storyboard_tab, production_tab, export_tab, project_tab = st.tabs(
-    ["Story Writer", "Characters", "Storyboard", "3D Production", "Voice & Export", "Save / Load"]
+story_tab, character_tab, storyboard_tab, production_tab, export_tab, project_tab, history_tab = st.tabs(
+    ["Story Writer", "Characters", "Storyboard", "3D Production", "Voice & Export", "Save / Load", "My History"]
 )
 
 with story_tab:
@@ -477,7 +554,12 @@ with story_tab:
                         api_key.strip(), idea, genre, visual_style, scene_count, character_bible
                     )
                 st.session_state.artwork = {}
-                st.success("Story generated. Review and edit it in Storyboard.")
+                st.session_state.current_history_id = str(uuid.uuid4())
+                st.session_state.active_genre = genre
+                st.session_state.active_style = visual_style
+                st.session_state.active_ratio = video_ratio
+                save_history_snapshot()
+                st.success("Story generated and saved to My History. Review it in Storyboard.")
             except requests.HTTPError as error:
                 detail = error.response.text[:1000] if error.response is not None else str(error)
                 st.error(f"Gemini request failed: {detail}")
@@ -554,7 +636,8 @@ with storyboard_tab:
                                     scene, st.session_state.characters, visual_style, video_ratio,
                                     progress_callback=update_image_progress
                                 )
-                                status_box.update(label="Image generated and saved to this project.", state="complete")
+                                save_history_snapshot()
+                                status_box.update(label="Image generated and saved to this project and My History.", state="complete")
                             st.rerun()
                         except Exception as error:
                             st.error(f"Free image generation failed: {error}")
@@ -566,6 +649,7 @@ with storyboard_tab:
                 uploaded = st.file_uploader("Or upload your own image (free)", type=["png", "jpg", "jpeg"], key=f"art_{index}")
                 if uploaded:
                     st.session_state.artwork[index] = uploaded.getvalue()
+                    save_history_snapshot()
                 if index in st.session_state.artwork:
                     st.image(st.session_state.artwork[index], use_container_width=True)
         st.caption("Generated images are saved in your project and used in MP4 exports. Free volunteer workers can be busy, so generation may take several minutes. Anonymous requests are shared with the community service; do not submit private photos or personal information. Character likeness consistency is best-effort.")
@@ -711,5 +795,58 @@ with project_tab:
         except Exception as error:
             st.error(f"Could not load project: {error}")
 
+with history_tab:
+    st.subheader("My History")
+    st.caption("Your latest 20 story creations are kept in this browser session. Save a History Backup JSON if you want to keep them after closing or refreshing the app.")
+    if st.session_state.creation_history:
+        history_export = json.dumps(
+            {"format_version": 1, "creations": st.session_state.creation_history},
+            ensure_ascii=False, indent=2
+        ).encode("utf-8")
+        st.download_button(
+            "Download my history backup", history_export,
+            file_name="ai_story_studio_history.json", mime="application/json"
+        )
+        for number, entry in enumerate(st.session_state.creation_history):
+            created = entry.get("created_at", "")[:19].replace("T", " ")
+            image_count = len(entry.get("artwork", {}))
+            with st.expander(f"{entry.get('title', 'Untitled')} · {created} · {image_count} images", expanded=(number == 0)):
+                st.write(f"**Type:** {entry.get('genre', 'Story')}  |  **Style:** {entry.get('style', '')}")
+                st.write(entry.get("story", {}).get("logline", ""))
+                if st.button("Open this creation", key=f"history_open_{entry.get('id', number)}"):
+                    restore_history_entry(entry)
+                    st.success("Creation restored. Open Storyboard or Voice & Export.")
+                    st.rerun()
+                for scene_key, encoded_image in entry.get("artwork", {}).items():
+                    try:
+                        st.image(base64.b64decode(encoded_image), caption=f"Scene {int(scene_key) + 1}", width=220)
+                    except Exception:
+                        pass
+        if st.button("Clear history", type="secondary"):
+            st.session_state.creation_history = []
+            st.session_state.current_history_id = None
+            st.rerun()
+    else:
+        st.info("Your creations will appear here automatically after you generate a story.")
+
+    st.divider()
+    st.write("**Restore a previous history backup**")
+    history_upload = st.file_uploader("Choose history backup JSON", type=["json"], key="history_import")
+    if st.button("Restore history backup", disabled=(history_upload is None)):
+        try:
+            backup = json.loads(history_upload.getvalue().decode("utf-8"))
+            entries = backup.get("creations", [])
+            if not isinstance(entries, list):
+                raise ValueError("History backup does not contain a creations list.")
+            valid_entries = [
+                item for item in entries[:20]
+                if isinstance(item, dict) and isinstance(item.get("story"), dict)
+            ]
+            st.session_state.creation_history = valid_entries
+            st.success(f"Restored {len(valid_entries)} creations.")
+            st.rerun()
+        except Exception as error:
+            st.error(f"Could not restore history: {error}")
+
 st.divider()
-st.caption("Version 4.2 · Multi-genre story studio with free community-powered AI images, reusable characters, 3D production tools and YouTube-ready exports.")
+st.caption("Version 4.3 · Faster free community image generation, creation history, reusable characters, reusable characters, 3D production tools and YouTube-ready exports.")
