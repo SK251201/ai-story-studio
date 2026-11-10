@@ -296,7 +296,8 @@ def generate_story(key, idea, genre, style, count, characters):
     prompt = f"""
 Create an original {genre} story based on this idea: {idea}
 Visual direction: {style}
-Character bible: {characters or "Create suitable original characters."}
+Character bible (use ONLY these reusable characters; do not invent replacements): {characters or "Create suitable original characters."}
+Select the most relevant characters for the topic and use their exact names. Assign only suitable characters to each scene in the characters array. Keep their face, age range, hairstyle, body shape, clothing, colours and accessories identical across every scene. Do not rename or redesign them.
 Create a production-ready script for a 3D animated video. Every visual_prompt must specify camera framing,
 camera movement, character action, facial expression, body language, environment, lighting, time of day and mood.
 Use original characters only. Return exactly {count} scenes as valid JSON with this structure:
@@ -599,13 +600,65 @@ def make_production_package(story, characters, artwork, ratio, language):
 if "story" not in st.session_state:
     st.session_state.story = None
 if "characters" not in st.session_state:
-    st.session_state.characters = []
+    st.session_state.characters = [dict(item, asset_file="", model_bytes=None, portrait_base64="", source_reference_base64="") for item in BUILTIN_CHARACTER_LIBRARY]
+else:
+    existing_character_names = {item.get("name", "").casefold() for item in st.session_state.characters}
+    for default_character in BUILTIN_CHARACTER_LIBRARY:
+        if default_character["name"].casefold() not in existing_character_names:
+            st.session_state.characters.append(dict(default_character, asset_file="", model_bytes=None, portrait_base64="", source_reference_base64=""))
 if "artwork" not in st.session_state:
     st.session_state.artwork = {}
 if "creation_history" not in st.session_state:
     st.session_state.creation_history = []
 if "current_history_id" not in st.session_state:
     st.session_state.current_history_id = None
+
+BUILTIN_CHARACTER_LIBRARY = [
+ {"name":"Aru","type":"Human","category":"kids","tags":["child","boy","school","friendship","rhyme","kids"],"description":"A cheerful 7-year-old Indian schoolboy with warm medium-brown skin, short neatly side-parted black hair, expressive dark-brown eyes, a sky-blue school shirt, navy shorts, white socks and black school shoes. Curious, brave and energetic.","visual_prompt":"Photoreal live-action child, sky-blue school shirt and navy shorts."},
+ {"name":"Maya","type":"Human","category":"kids","tags":["child","girl","school","friendship","rhyme","kids"],"description":"A cheerful 7-year-old Indian schoolgirl with warm medium-brown skin, large brown eyes, long black hair in two braids with yellow ribbons, teal pinafore over a white shirt and white shoes. Kind and confident.","visual_prompt":"Photoreal live-action child, teal pinafore, white shirt and twin braids."},
+ {"name":"Paati","type":"Human","category":"family","tags":["grandmother","family","kids","rhyme","village","home"],"description":"A kind Indian grandmother in her late 60s with silver hair in a low bun, gentle eyes, round glasses, lavender cotton saree and sandals. Warm, wise and playful.","visual_prompt":"Photoreal live-action elderly Indian woman in lavender saree."},
+ {"name":"Kutti","type":"Animal","category":"animals","tags":["puppy","dog","pet","animal","kids","rhyme","friendship"],"description":"A small golden Indian-spitz puppy with fluffy cream-gold fur, floppy-tipped ears, round dark eyes and a green collar. Playful and loyal.","visual_prompt":"Photoreal realistic fluffy golden puppy with green collar."},
+ {"name":"Mittu","type":"Animal","category":"animals","tags":["parrot","bird","animal","kids","rhyme","comedy"],"description":"A bright green parrot with yellow chest, curved red beak, subtle blue wing feathers and lively intelligent eyes. Curious and mischievous.","visual_prompt":"Photoreal realistic green parrot, yellow chest and red beak."},
+ {"name":"Karthik","type":"Human","category":"comedy","tags":["comedy","funny","friends","office","adult","man"],"description":"A slim 25-year-old Indian man with medium-brown skin, short curly black hair, expressive eyebrows, red-and-black checked shirt, dark jeans and sneakers. Overconfident, talkative and lovable.","visual_prompt":"Photoreal live-action young Indian man in red-black checked shirt."},
+ {"name":"Bala","type":"Human","category":"comedy","tags":["comedy","funny","friends","office","adult","man"],"description":"A cheerful stocky 27-year-old Indian man with medium-brown skin, round face, short black hair, orange polo shirt, dark trousers and sandals. Good-hearted and easily confused.","visual_prompt":"Photoreal live-action young Indian man in orange polo shirt."},
+ {"name":"Boss Kumar","type":"Human","category":"comedy","tags":["comedy","office","boss","work","adult"],"description":"A middle-aged Indian office manager with neatly combed black hair, trimmed moustache, rectangular glasses, pale-blue formal shirt and charcoal trousers. Stern but comical.","visual_prompt":"Photoreal middle-aged Indian office manager in pale-blue shirt and glasses."},
+ {"name":"Raja","type":"Animal","category":"animals","tags":["lion","wildlife","jungle","animal","adventure","kids"],"description":"A young Asiatic lion with tawny-gold fur, soft developing mane, amber eyes and a small notch in the left ear. Gentle but courageous.","visual_prompt":"Photoreal cinematic young Asiatic lion."},
+ {"name":"Mimi","type":"Animal","category":"animals","tags":["rabbit","bunny","forest","animal","kids","adventure"],"description":"A small white rabbit with soft fur, pink inner ears, bright dark eyes and a sky-blue neck scarf. Quick and friendly.","visual_prompt":"Photoreal white rabbit with sky-blue scarf."},
+ {"name":"Aadi","type":"Human","category":"adventure","tags":["adventure","treasure","explore","journey","hero"],"description":"A brave 16-year-old Indian adventurer with medium-brown skin, tousled black hair, alert brown eyes, forest-green utility jacket, tan cargo trousers, hiking boots and canvas shoulder bag.","visual_prompt":"Photoreal teenage Indian adventurer in green jacket and tan cargo trousers."},
+ {"name":"Luna","type":"Fantasy","category":"fantasy","tags":["fantasy","magic","princess","space","moon","adventure"],"description":"An original moon guardian with silver-blue hair, luminous pale-blue eyes, midnight-blue cloak embroidered with tiny stars and a silver pendant. Calm and brave.","visual_prompt":"Cinematic realistic fantasy character with silver-blue hair and star cloak."},
+ {"name":"Ember","type":"Fantasy","category":"fantasy","tags":["fantasy","dragon","magic","fire","adventure","kids"],"description":"A small friendly dragon with ruby-red scales, golden eyes, two short curved horns and softly glowing orange wing membranes. Playful.","visual_prompt":"Detailed realistic fantasy dragon with ruby scales."},
+ {"name":"Arun","type":"Human","category":"family","tags":["family","father","husband","city","work","human","drama"],"description":"A 30-year-old Indian man with medium-brown skin, short black hair, close-trimmed beard, navy casual shirt, dark trousers and wristwatch. Thoughtful and dependable.","visual_prompt":"Photoreal Indian adult man in navy shirt."},
+ {"name":"Priya","type":"Human","category":"family","tags":["family","mother","wife","city","work","human","drama"],"description":"A 28-year-old Indian woman with medium-brown skin, expressive brown eyes, long dark hair, simple teal kurta and small earrings. Warm and confident.","visual_prompt":"Photoreal Indian adult woman in teal kurta."},
+ {"name":"Teacher Meena","type":"Human","category":"kids","tags":["teacher","school","classroom","child","education","kids"],"description":"A friendly Indian schoolteacher in her early 30s with medium-brown skin, dark hair tied back, rectangular glasses and neat pastel salwar suit. Patient and encouraging.","visual_prompt":"Photoreal Indian female teacher in pastel salwar suit."},
+ {"name":"Pechu","type":"Animal","category":"comedy","tags":["monkey","jungle","comedy","funny","animal","kids"],"description":"A mischievous bonnet macaque with realistic brown fur, expressive eyes and a tiny red scarf. Clever and cheeky.","visual_prompt":"Photoreal bonnet macaque monkey with red scarf."}
+]
+
+
+def select_characters_for_story(idea, genre, characters, limit=4):
+    """Choose matching built-in cast locally; no image service is called."""
+    text = f"{idea} {genre}".casefold()
+    scores = []
+    for order, character in enumerate(characters):
+        tags = character.get("tags", [])
+        score = sum(2 for tag in tags if str(tag).casefold() in text)
+        category = character.get("category", "")
+        if category == "comedy" and any(word in text for word in ["comedy","funny","joke","office"]):
+            score += 5
+        if category == "kids" and any(word in text for word in ["rhyme","nursery","kids","children","school"]):
+            score += 4
+        if category == "animals" and any(word in text for word in ["animal","jungle","forest","pet","puppy","lion","rabbit","parrot"]):
+            score += 4
+        if category == "fantasy" and any(word in text for word in ["magic","dragon","fantasy","kingdom","princess","wizard","space"]):
+            score += 5
+        if category == "family" and any(word in text for word in ["family","mother","father","grandmother","home","village"]):
+            score += 4
+        if category == "adventure" and any(word in text for word in ["adventure","treasure","journey","explore","hero"]):
+            score += 4
+        scores.append((score, order, character))
+    scores.sort(key=lambda row: (-row[0], row[1]))
+    chosen = [row[2] for row in scores if row[0] > 0][:limit]
+    return chosen or [row[2] for row in scores[:2]]
+
 
 def save_history_snapshot():
     """Keep a restorable, bounded history of stories and their generated images."""
@@ -651,7 +704,7 @@ with st.sidebar:
     st.header("Project settings")
     api_key = st.text_input("Gemini API key", value=get_secret_key(), type="password")
     st.caption("Use Streamlit Secrets for deployment. Never commit your key to GitHub.")
-    st.success("AI images: FREE community generation. No image API key or payment details required.")
+    st.success("Character library: built in and automatically matched to story topics. Scene artwork: free community generation.")
     st.caption("Images are created by volunteer AI Horde computers. Anonymous requests may wait in a queue; availability is not guaranteed.")
     genre = st.selectbox("Content type", ["Tamil nursery rhyme / kids song", "Comedy", "Moral story",
                                    "Bedtime story", "Adventure", "Educational", "Fantasy",
@@ -677,12 +730,16 @@ with story_tab:
         elif not api_key.strip():
             st.warning("Add your Gemini API key in the sidebar or Streamlit Secrets.")
         else:
+            selected_characters = select_characters_for_story(
+                idea, genre, st.session_state.characters, limit=4
+            )
+            st.session_state.selected_story_characters = [item["name"] for item in selected_characters]
             character_bible = "; ".join(
-                f"{character['name']}: {character['description']}"
-                for character in st.session_state.characters
+                f"{character['name']} ({character.get('type', 'Character')}): {character['description']}"
+                for character in selected_characters
             )
             try:
-                with st.spinner("Writing your original story..."):
+                with st.spinner("Choosing characters from your built-in library and writing your story..."):
                     st.session_state.story = generate_story(
                         api_key.strip(), idea, genre, visual_style, scene_count, character_bible
                     )
@@ -692,7 +749,7 @@ with story_tab:
                 st.session_state.active_style = visual_style
                 st.session_state.active_ratio = video_ratio
                 save_history_snapshot()
-                st.success("Story generated and saved to My History. Review it in Storyboard.")
+                st.success("Story generated and saved to My History. Auto-selected characters: " + ", ".join(st.session_state.selected_story_characters) + ". Review it in Storyboard.")
             except requests.HTTPError as error:
                 detail = error.response.text[:1000] if error.response is not None else str(error)
                 st.error(f"Gemini request failed: {detail}")
@@ -854,21 +911,6 @@ with character_tab:
             st.error(f"Could not import character library: {error}")
 
     st.divider()
-    portrait_style = st.selectbox(
-        "Character portrait appearance",
-        [
-            "Photoreal live-action human",
-            "High-quality realistic 3D humans",
-            "Stylized 3D animated humans",
-            "Photoreal realistic animals",
-            "Realistic 3D animals",
-            "Stylized 3D animated animals",
-            "3D fantasy characters",
-        ],
-        key="character_portrait_style",
-        help="Choose the portrait look independently from the visual style used for your current story."
-    )
-
     st.markdown(f"#### Your reusable cast ({len(st.session_state.characters)} characters)")
     for index, character in enumerate(st.session_state.characters):
         with st.expander(f"{character.get('name', 'Character')} · {character.get('type', 'Character')}", expanded=(index == 0)):
@@ -888,18 +930,8 @@ with character_tab:
                 except Exception:
                     pass
             st.write(character.get("description", ""))
-            portrait_col, model_col = st.columns(2)
-            with portrait_col:
-                if st.button("Generate free character portrait", key=f"character_portrait_{index}"):
-                    try:
-                        with st.spinner("Waiting for a free community image worker..."):
-                            portrait = generate_character_portrait(character, portrait_style, video_ratio)
-                        character["portrait_base64"] = base64.b64encode(portrait).decode("ascii")
-                        save_history_snapshot()
-                        st.success("Character portrait saved to your reusable library.")
-                        st.rerun()
-                    except Exception as error:
-                        st.error(f"Portrait generation failed: {error}")
+            st.caption("Built-in reusable character profile. Automatically selected for matching story topics; no image-generation request or community-worker queue.")
+            model_col = st.container()
             with model_col:
                 model_upload = st.file_uploader(
                     "Attach rigged 3D model (.glb or .fbx)", type=["glb", "fbx"],
@@ -1160,4 +1192,4 @@ with history_tab:
             st.error(f"Could not restore history: {error}")
 
 st.divider()
-st.caption("Version 4.7 · Character Studio with independent photoreal human, realistic animal and stylized 3D portrait controls, reusable characters, 3D production tools and YouTube-ready exports.")
+st.caption("Version 4.8 · Built-in reusable character library with automatic story-topic casting; no community image queue for character selection, reusable characters, 3D production tools and YouTube-ready exports.")
