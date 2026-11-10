@@ -13,7 +13,7 @@ AI Story Studio helps create original multi-genre stories and prepare reusable c
 - Free anonymous realistic per-scene image generation through AI Horde volunteer workers (no image API key or payment required)
 - Generated or uploaded scene images are saved in project backups and used in narrated MP4 exports
 - Character bible with type, appearance and personality
-- Per-character GLB model upload
+- Per-character GLB/FBX model upload
 - Per-scene character casting and editable narration/dialogue/shot direction
 - Project JSON backup including attached 3D character files and storyboard images
 - Existing narrated slideshow MP4 export
@@ -35,7 +35,7 @@ The current renderer:
 ## Local rendering setup
 1. Create a story in the web app.
 2. Add each original character in Characters.
-3. Upload a rigged .glb model for each character.
+3. Upload a rigged .glb or .fbx model for each character.
 4. Assign characters to scenes in Storyboard.
 5. Open 3D Production and download the production ZIP.
 6. Extract the ZIP on a Windows, macOS or Linux computer.
