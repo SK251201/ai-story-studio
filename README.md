@@ -10,7 +10,7 @@ AI Story Studio helps create original multi-genre stories and prepare reusable c
 
 ## Streamlit studio features
 - Gemini story and shot-direction generation (API key and provider quotas apply)
-- Optional realistic per-scene image generation through Pollinations (user-owned secret key and Pollen balance required)
+- Free anonymous realistic per-scene image generation through AI Horde volunteer workers (no image API key or payment required)
 - Generated or uploaded scene images are saved in project backups and used in narrated MP4 exports
 - Character bible with type, appearance and personality
 - Per-character GLB model upload
@@ -53,7 +53,7 @@ If Blender or FFmpeg is not on PATH, use --blender and --ffmpeg with their full 
 2. Clone this repository.
 3. Install dependencies: pip install -r requirements.txt
 4. Run: streamlit run app.py
-5. Add GEMINI_API_KEY to Streamlit Secrets or environment variables. For optional image generation, add POLLINATIONS_API_KEY or enter your Pollinations secret key in the app sidebar.
+5. Add GEMINI_API_KEY to Streamlit Secrets or environment variables. No image-generation API key or billing setup is required.
 
 Never put API keys in source code or commit them to GitHub.
 
@@ -66,7 +66,7 @@ Then deploy or reboot the app. Never share your API key in chat.
 
 ## Important costs and licensing
 - Gemini API has model-specific quotas and may require billing after free limits. This app cannot bypass those limits.
-- Pollinations image generation requires a secret key and consumes the account's Pollen balance. It is not unlimited-free. Generate images one at a time and set a strict budget on the provider key. Use free/earned Pollen only if available; otherwise upload your own images at no API cost.
+- AI Horde image generation is free to use anonymously through volunteer computers. Anonymous requests have lower priority and limits, so queue times and availability vary. Anonymous prompts and generated images may be shared with the community service; do not submit private photos or personal information.
 - Blender is free and open source; local rendering uses your computer's resources. Adobe Mixamo provides free humanoid characters and animations; check its licence and download a rigged FBX for use in the app.
 - gTTS requires internet access.
 - Use only original stories, models, voices and music that you have rights to use commercially.
