@@ -10,6 +10,10 @@ from pathlib import Path
 import imageio_ffmpeg
 import requests
 import streamlit as st
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 from gtts import gTTS
 from PIL import Image, ImageDraw
 
@@ -147,6 +151,88 @@ def generate_scene_image(key, prompt, style, ratio, reference_bytes=None):
         if image_data and image_data.get("data"):
             return base64.b64decode(image_data["data"])
     raise ValueError("Gemini response did not contain an image. Check model access and API quota.")
+
+
+YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
+YOUTUBE_REDIRECT_PATH = "/oauth2callback"
+
+
+def youtube_oauth_config():
+    cfg = st.secrets.get("youtube", {})
+    client_id = cfg.get("client_id", "")
+    client_secret = cfg.get("client_secret", "")
+    if not client_id or not client_secret:
+        return None
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets.get("youtube_redirect_uri", "")],
+        }
+    }
+
+
+def youtube_flow(state=None):
+    config = youtube_oauth_config()
+    if not config:
+        raise RuntimeError("Add [youtube].client_id, [youtube].client_secret and youtube_redirect_uri in Streamlit Secrets.")
+    redirect_uri = st.secrets.get("youtube_redirect_uri", "")
+    if not redirect_uri:
+        raise RuntimeError("Set youtube_redirect_uri in Streamlit Secrets.")
+    flow = Flow.from_client_config(config, scopes=YOUTUBE_SCOPE, state=state)
+    flow.redirect_uri = redirect_uri
+    return flow
+
+
+def youtube_credentials_from_session():
+    token = st.session_state.get("youtube_token")
+    if not token:
+        return None
+    return Credentials.from_authorized_user_info(token, YOUTUBE_SCOPE)
+
+
+def handle_youtube_oauth_callback():
+    params = st.query_params
+    code = params.get("code")
+    state = params.get("state")
+    if not code:
+        return
+    expected_state = st.session_state.get("youtube_oauth_state")
+    if not expected_state or state != expected_state:
+        st.error("YouTube authorization state did not match. Please connect again.")
+        st.query_params.clear()
+        return
+    try:
+        flow = youtube_flow(state=expected_state)
+        flow.fetch_token(code=code)
+        st.session_state.youtube_token = json.loads(flow.credentials.to_json())
+        st.session_state.youtube_oauth_state = None
+        st.query_params.clear()
+        st.success("YouTube channel connected. You can now upload manually.")
+    except Exception as error:
+        st.error(f"YouTube authorization failed: {error}")
+        st.query_params.clear()
+
+
+def upload_video_to_youtube(video_bytes, title, description, tags):
+    credentials = youtube_credentials_from_session()
+    if not credentials:
+        raise RuntimeError("Connect your YouTube channel first.")
+    youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
+    body = {
+        "snippet": {
+            "title": title[:100],
+            "description": description[:5000],
+            "tags": [tag.strip() for tag in tags.split(",") if tag.strip()][:500],
+            "categoryId": "22",
+        },
+        "status": {"privacyStatus": "unlisted", "selfDeclaredMadeForKids": False},
+    }
+    media = MediaIoBaseUpload(BytesIO(video_bytes), mimetype="video/mp4", chunksize=1024 * 1024, resumable=True)
+    response = youtube.videos().insert(part="snippet,status", body=body, media_body=media).execute()
+    return response.get("id")
 
 def render_scene_card(scene, artwork_bytes, width, height, index, total):
     if artwork_bytes:
@@ -393,13 +479,61 @@ with export_tab:
                         st.session_state.story["scenes"], st.session_state.artwork,
                         video_ratio, narration_language
                     )
-                st.video(video_bytes)
-                st.download_button(
-                    "Download MP4", video_bytes, file_name="ai-story-studio.mp4",
-                    mime="video/mp4", type="primary"
-                )
+                st.session_state.generated_video = video_bytes
+                st.success("Your MP4 is ready.")
             except Exception as error:
                 st.error(f"Video export failed: {error}")
+        if st.session_state.get("generated_video"):
+            video_bytes = st.session_state.generated_video
+            st.video(video_bytes)
+            st.download_button(
+                "Download MP4", video_bytes, file_name="ai-story-studio.mp4",
+                mime="video/mp4", type="primary", key="download_generated_mp4"
+            )
+            st.divider()
+            st.subheader("Upload to YouTube")
+            st.caption("Manual upload only. The app always uploads as Unlisted; review it in YouTube Studio before sharing.")
+            handle_youtube_oauth_callback()
+            credentials = youtube_credentials_from_session()
+            if credentials:
+                st.success("YouTube channel is connected.")
+                if st.button("Disconnect YouTube", key="disconnect_youtube"):
+                    st.session_state.youtube_token = None
+                    st.rerun()
+            else:
+                st.info("Connect your YouTube channel once to enable manual uploads.")
+                if st.button("Connect YouTube channel", key="connect_youtube"):
+                    try:
+                        flow = youtube_flow()
+                        auth_url, state = flow.authorization_url(
+                            access_type="offline",
+                            include_granted_scopes="true",
+                            prompt="consent",
+                        )
+                        st.session_state.youtube_oauth_state = state
+                        st.link_button("Continue with Google", auth_url)
+                    except Exception as error:
+                        st.error(str(error))
+            upload_title = st.text_input(
+                "YouTube title", value=st.session_state.story.get("title", "My AI Story")[:100],
+                max_chars=100, key="youtube_upload_title"
+            )
+            upload_description = st.text_area(
+                "Description", value=st.session_state.story.get("logline", ""),
+                max_chars=5000, key="youtube_upload_description"
+            )
+            upload_tags = st.text_input("Tags (comma-separated)", key="youtube_upload_tags")
+            st.warning("Manual approval required: clicking below uploads this video as UNLISTED to your connected channel. It will not be made public.")
+            if st.button("Upload this video as Unlisted", type="primary", disabled=(credentials is None)):
+                try:
+                    with st.spinner("Uploading video to YouTube..."):
+                        video_id = upload_video_to_youtube(
+                            video_bytes, upload_title, upload_description, upload_tags
+                        )
+                    st.success("Upload complete. Your video is Unlisted.")
+                    st.markdown(f"[Open your YouTube video](https://www.youtube.com/watch?v={video_id})")
+                except Exception as error:
+                    st.error(f"YouTube upload failed: {error}")
 
 with project_tab:
     st.subheader("Save your project")
